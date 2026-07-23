@@ -20,6 +20,7 @@ export interface ResolvedTenant {
     fontHeading: string;
     fontBody: string;
     logoUrl: string | null;
+    positioningBadge: string | null;
   };
 }
 
@@ -57,6 +58,7 @@ export async function resolveTenant(hostname: string): Promise<ResolvedTenant | 
             fontHeading: t.branding?.fontHeading ?? "Fraunces",
             fontBody: t.branding?.fontBody ?? "Inter",
             logoUrl: t.branding?.logoUrl ?? null,
+            positioningBadge: t.branding?.positioningBadge ?? null,
           },
         }
       : null;

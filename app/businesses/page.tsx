@@ -6,8 +6,12 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { resolveTenant } from "@/lib/tenant";
-import { searchListings, suggestNearby, type SearchHit } from "@/lib/search";
+import { searchListings, suggestNearby, type SearchHit, type SortKey } from "@/lib/search";
 import { parseSearchParams, buildSearchUrl, shouldIndex } from "@/lib/searchParams";
+import { getTenantCategories } from "@/lib/categories";
+import { getCurrentUser } from "@/lib/auth/currentUser";
+import { Header } from "@/components/Header";
+import { ListingCard } from "@/components/ListingCard";
 
 type SearchParamsRecord = Record<string, string | string[] | undefined>;
 
@@ -47,19 +51,30 @@ export async function generateMetadata({
   };
 }
 
+const SORTS: { value: SortKey; label: string }[] = [
+  { value: "relevance", label: "Most relevant" },
+  { value: "distance", label: "Nearest" },
+  { value: "rating", label: "Highest rated" },
+  { value: "newest", label: "Newest" },
+];
+
 export default async function BusinessesPage({
   searchParams,
 }: {
   searchParams: Promise<SearchParamsRecord>;
 }) {
   const host = (await headers()).get("host") ?? "";
-  const tenant = await resolveTenant(host);
+  const [tenant, user] = await Promise.all([resolveTenant(host), getCurrentUser()]);
   if (!tenant) notFound();
 
   const sp = toURLSearchParams(await searchParams);
   const params = parseSearchParams(sp, tenant.id);
-  const results = await searchListings(params);
+  const [results, categories] = await Promise.all([
+    searchListings(params),
+    getTenantCategories(tenant),
+  ]);
   const nearby = results.hits.length === 0 ? await suggestNearby(params) : [];
+  const selectedCats = new Set(params.categorySlugs ?? []);
 
   return (
     <main
@@ -74,15 +89,12 @@ export default async function BusinessesPage({
         } as React.CSSProperties
       }
     >
+      <Header tenant={tenant} user={user} />
+
       <div className="mx-auto max-w-6xl px-5 py-10">
         <header className="mb-8">
-          <p className="text-xs uppercase tracking-[0.18em] opacity-60">
-            {tenant.name}
-          </p>
-          <h1
-            className="mt-2 text-4xl font-semibold tracking-tight"
-            style={{ fontFamily: tenant.branding.fontHeading }}
-          >
+          <p className="text-xs uppercase tracking-[0.18em] opacity-60">{tenant.name}</p>
+          <h1 className="font-heading mt-2 text-4xl font-semibold tracking-tight">
             {params.q ? `Results for "${params.q}"` : "Local businesses"}
           </h1>
           <p className="mt-2 text-sm opacity-70" aria-live="polite">
@@ -90,6 +102,73 @@ export default async function BusinessesPage({
             {results.totalApprox === 1 ? "business" : "businesses"} found
           </p>
         </header>
+
+        <form
+          method="get"
+          action="/businesses"
+          className="mb-8 rounded-xl border border-black/[0.07] bg-white p-4 shadow-[0_1px_2px_rgba(48,43,39,0.04)]"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <label htmlFor="q" className="sr-only">
+              Keyword
+            </label>
+            <input
+              id="q"
+              name="q"
+              type="text"
+              defaultValue={params.q ?? ""}
+              placeholder="Search businesses..."
+              className="w-full flex-1 rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 sm:max-w-xs"
+            />
+
+            <label htmlFor="sort" className="sr-only">
+              Sort
+            </label>
+            <select
+              id="sort"
+              name="sort"
+              defaultValue={params.sort ?? "relevance"}
+              className="rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10"
+            >
+              {SORTS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+
+            <label className="flex items-center gap-2 whitespace-nowrap text-sm">
+              <input type="checkbox" name="verified" value="1" defaultChecked={params.verifiedOnly} className="rounded" />
+              Verified only
+            </label>
+            <label className="flex items-center gap-2 whitespace-nowrap text-sm">
+              <input type="checkbox" name="open" value="1" defaultChecked={params.openNow} className="rounded" />
+              Open now
+            </label>
+
+            <button
+              type="submit"
+              className="shrink-0 rounded-lg px-5 py-2 text-sm font-medium text-white transition"
+              style={{ backgroundColor: "var(--primary)" }}
+            >
+              Apply filters
+            </button>
+          </div>
+
+          {categories.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2 border-t border-black/[0.06] pt-4">
+              {categories.map((c) => (
+                <label
+                  key={c.slug}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-full border border-black/10 px-3 py-1 text-xs transition has-[:checked]:border-[var(--primary)] has-[:checked]:bg-[var(--primary)] has-[:checked]:text-white"
+                >
+                  <input type="checkbox" name="cat" value={c.slug} defaultChecked={selectedCats.has(c.slug)} className="sr-only" />
+                  {c.name}
+                </label>
+              ))}
+            </div>
+          )}
+        </form>
 
         {results.sponsored.length > 0 && (
           <section aria-label="Sponsored results" className="mb-6 space-y-3">
@@ -127,56 +206,6 @@ export default async function BusinessesPage({
         )}
       </div>
     </main>
-  );
-}
-
-function ListingCard({ hit, sponsored }: { hit: SearchHit; sponsored?: boolean }) {
-  const miles = hit.distanceMeters != null ? hit.distanceMeters / 1609.34 : null;
-
-  return (
-    <article className="rounded-xl border border-black/[0.07] bg-white p-5 shadow-[0_1px_2px_rgba(48,43,39,0.04)] transition hover:shadow-[0_4px_16px_rgba(48,43,39,0.08)]">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold">
-            <a href={`/listing/${hit.slug}`} className="hover:underline">
-              {hit.tradingName}
-            </a>
-          </h2>
-          {hit.summary && (
-            <p className="mt-1 line-clamp-2 text-sm opacity-75">{hit.summary}</p>
-          )}
-        </div>
-
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          {sponsored && (
-            // Disclosure is required and must not be visually suppressed.
-            <span className="rounded border border-black/10 px-2 py-0.5 text-[11px] uppercase tracking-wider opacity-70">
-              Sponsored
-            </span>
-          )}
-          {hit.verified && (
-            <span
-              className="text-[11px] font-medium uppercase tracking-wider"
-              style={{ color: "var(--primary)" }}
-            >
-              ✓ Verified
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm opacity-70">
-        {hit.avgRating != null && hit.reviewCount > 0 && (
-          <span>
-            {hit.avgRating.toFixed(1)} ★{" "}
-            <span className="opacity-70">
-              ({hit.reviewCount} {hit.reviewCount === 1 ? "review" : "reviews"})
-            </span>
-          </span>
-        )}
-        {miles != null && <span>{miles.toFixed(1)} miles away</span>}
-      </div>
-    </article>
   );
 }
 

@@ -27,6 +27,13 @@ remaining slice needs real sessions and `can()`, which now exist.
 - **Session listing / "log out everywhere".** `Session` rows exist and
   `destroyAllSessionsForUser` is already used by password reset, but there's
   no UI for a user to see or revoke their own other active sessions.
+- **Mobile nav.** `Header` is a single-row desktop layout with no hamburger
+  menu or responsive collapse yet — fine down to small-desktop widths, not
+  yet tested/built for phone-width viewports.
+- **Real photography.** The hero uses a CSS-only dot-grid texture instead
+  of the reference design's location photography, because there's no real,
+  licensed imagery to use yet and a stock placeholder would look fake.
+  Swap in per-tenant hero images once `MediaAsset` upload exists (Slice 7).
 
 - **Map UI (Slice 4).** `search.ts` returns `lat`/`lng`/`distanceMeters` per
   hit and the list view is complete, but there's no `MapProvider` interface
