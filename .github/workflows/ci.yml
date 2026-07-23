@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lih
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Superuser connection, used only for migrations and seeding.
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/lih?schema=public
+      # Non-superuser app role, created below — this is what RLS is tested against.
+      DATABASE_URL: postgresql://lih_app:lih_app_pw@localhost:5432/lih?schema=public
+      AUTH_SECRET: ci-test-secret-not-for-production-use-only
+      AUTH_URL: http://localhost:3000
+      CREDENTIALS_ENCRYPTION_KEY: Y2ktdGVzdC1lbmNyeXB0aW9uLWtleS0zMmJ5dGVzIQ==
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create non-superuser app role (RLS cannot be tested from a superuser connection)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d lih -c \
+            "CREATE ROLE lih_app LOGIN PASSWORD 'lih_app_pw' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d lih -c \
+            "GRANT ALL ON SCHEMA public TO lih_app;
+             ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO lih_app;
+             ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO lih_app;"
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Migrate (as superuser)
+        run: npx prisma migrate deploy
+
+      - name: Grant table privileges to the app role post-migration
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d lih -c \
+            "GRANT ALL ON ALL TABLES IN SCHEMA public TO lih_app;
+             GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO lih_app;"
+
+      - name: Apply PostGIS extensions, spatial/FTS indexes and RLS policies
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d lih -f prisma/migrations/001_postgis_and_rls.sql
+
+      - name: Seed demo data
+        run: npx tsx prisma/seed.ts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Scan the build output for secret-shaped strings
+        run: |
+          npm run build
+          if grep -rEIl "sk_live_|whsec_|AKIA[0-9A-Z]{16}|BEGIN (RSA|EC|OPENSSH) PRIVATE KEY" .next/static .next/server 2>/dev/null; then
+            echo "Potential secret found in build output" >&2
+            exit 1
+          fi

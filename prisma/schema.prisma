@@ -1,0 +1,1461 @@
+// Local Initiative — Phase 1 schema
+// PostgreSQL + PostGIS. All timestamps UTC. Money = integer minor units.
+//
+// Modelling rules enforced here:
+//   - Organisation != Location. A business org owns 1..n physical locations.
+//   - Placement is the ONLY thing that makes a record visible on a tenant.
+//   - Ownership/claims are separate from the public listing.
+//   - External provider IDs always carry (provider, account) context.
+//   - Consent records purpose + channel + wording version + withdrawal.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [postgis, pg_trgm, uuidOssp(map: "uuid-ossp")]
+}
+
+// ─────────────────────────────────────────────────────────────
+// TENANCY
+// ─────────────────────────────────────────────────────────────
+
+enum TenantKind {
+  GEOGRAPHIC
+  NICHE
+  HYBRID
+}
+
+enum TenantStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+model Tenant {
+  id       String       @id @default(uuid()) @db.Uuid
+  slug     String       @unique
+  name     String
+  kind     TenantKind
+  status   TenantStatus @default(DRAFT)
+  timezone String       @default("Europe/London")
+  currency String       @default("GBP")
+
+  // Coverage. Geographic tenants scope by place; niche tenants by category.
+  coveragePlaceIds    String[] @map("coverage_place_ids") @db.Uuid
+  coverageCategoryIds String[] @map("coverage_category_ids") @db.Uuid
+
+  // GHL mapping lives on the connection, not here — see IntegrationConnection.
+
+  branding    TenantBranding?
+  domains     TenantDomain[]
+  placements  DirectoryPlacement[]
+  plans       Plan[]
+  pages       Page[]
+  connections IntegrationConnection[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([status])
+  @@map("tenants")
+}
+
+model TenantDomain {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  hostname   String    @unique // apex, subdomain, or custom domain
+  isPrimary  Boolean   @default(false) @map("is_primary")
+  verifiedAt DateTime? @map("verified_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tenant_domains")
+}
+
+model TenantBranding {
+  tenantId         String  @id @map("tenant_id") @db.Uuid
+  logoUrl          String? @map("logo_url")
+  faviconUrl       String? @map("favicon_url")
+  heroImageUrl     String? @map("hero_image_url")
+  colorPrimary     String  @default("#9B7F58") @map("color_primary")
+  colorInk         String  @default("#302B27") @map("color_ink")
+  colorSurface     String  @default("#FBF8F3") @map("color_surface")
+  fontHeading      String  @default("Fraunces") @map("font_heading")
+  fontBody         String  @default("Inter") @map("font_body")
+  positioningBadge String? @map("positioning_badge")
+  metaTitle        String? @map("meta_title")
+  metaDescription  String? @map("meta_description")
+  socialImageUrl   String? @map("social_image_url")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_branding")
+}
+
+// ─────────────────────────────────────────────────────────────
+// IDENTITY, ROLES, PERMISSIONS
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  passwordHash    String?   @map("password_hash")
+  mfaEnrolledAt   DateTime? @map("mfa_enrolled_at")
+  lastSeenAt      DateTime? @map("last_seen_at")
+
+  profile         UserProfile?
+  roles           UserRoleAssignment[]
+  ownedBusinesses BusinessOwner[]
+  teamSeats       BusinessTeamMember[]
+  claims          ListingClaim[]
+  reviews         Review[]
+  favourites      Favourite[]
+  follows         Follow[]
+  offerClaims     OfferClaim[]
+  rsvps           Rsvp[]
+  enquiries       Enquiry[]
+  consents        ConsentRecord[]
+  notifPrefs      NotificationPreference[]
+  subscriptions   NewsletterSubscription[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@map("users")
+}
+
+model UserProfile {
+  userId              String   @id @map("user_id") @db.Uuid
+  displayName         String?  @map("display_name")
+  avatarUrl           String?  @map("avatar_url")
+  homePlaceId         String?  @map("home_place_id") @db.Uuid
+  radiusMeters        Int      @default(16000) @map("radius_meters")
+  interestCategoryIds String[] @map("interest_category_ids") @db.Uuid
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  place Place? @relation(fields: [homePlaceId], references: [id])
+
+  @@map("user_profiles")
+}
+
+enum RoleScope {
+  PLATFORM
+  TENANT
+  BUSINESS
+}
+
+model Role {
+  id          String               @id @default(uuid()) @db.Uuid
+  key         String               @unique // super_admin, tenant_admin, editor, moderator, sales, support, analyst
+  label       String
+  scope       RoleScope
+  permissions RolePermission[]
+  assignments UserRoleAssignment[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id    String           @id @default(uuid()) @db.Uuid
+  key   String           @unique // listings.approve, reviews.moderate, billing.refund ...
+  label String
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// Scope columns are nullable: a PLATFORM role has neither set.
+model UserRoleAssignment {
+  id         String  @id @default(uuid()) @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  roleId     String  @map("role_id") @db.Uuid
+  tenantId   String? @map("tenant_id") @db.Uuid
+  businessId String? @map("business_id") @db.Uuid
+
+  grantedBy String?   @map("granted_by") @db.Uuid
+  grantedAt DateTime  @default(now()) @map("granted_at")
+  expiresAt DateTime? @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, tenantId, businessId])
+  @@index([tenantId])
+  @@index([businessId])
+  @@map("user_role_assignments")
+}
+
+// ─────────────────────────────────────────────────────────────
+// PLACES (UK hierarchy)
+// ─────────────────────────────────────────────────────────────
+
+enum PlaceKind {
+  COUNTRY
+  REGION
+  COUNTY
+  CITY
+  TOWN
+  NEIGHBOURHOOD
+}
+
+model Place {
+  id       String                                       @id @default(uuid()) @db.Uuid
+  kind     PlaceKind
+  name     String
+  slug     String
+  parentId String?                                      @map("parent_id") @db.Uuid
+  // Unsupported: PostGIS types not native to Prisma. Managed via raw migration.
+  centroid Unsupported("geography(Point,4326)")?
+  boundary Unsupported("geography(MultiPolygon,4326)")?
+  onsCode  String?                                      @map("ons_code")
+
+  parent    Place?             @relation("PlaceTree", fields: [parentId], references: [id])
+  children  Place[]            @relation("PlaceTree")
+  locations BusinessLocation[]
+  profiles  UserProfile[]
+
+  @@unique([parentId, slug])
+  @@index([kind])
+  @@map("places")
+}
+
+// ─────────────────────────────────────────────────────────────
+// TAXONOMY
+// ─────────────────────────────────────────────────────────────
+
+model Category {
+  id         String  @id @default(uuid()) @db.Uuid
+  slug       String  @unique
+  name       String
+  parentId   String? @map("parent_id") @db.Uuid
+  iconKey    String? @map("icon_key")
+  schemaType String? @map("schema_type") // LocalBusiness subtype for JSON-LD
+  sortOrder  Int     @default(0) @map("sort_order")
+  isActive   Boolean @default(true) @map("is_active")
+
+  parent     Category?           @relation("CategoryTree", fields: [parentId], references: [id])
+  children   Category[]          @relation("CategoryTree")
+  businesses BusinessCategory[]
+  attributes CategoryAttribute[]
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+enum AttributeType {
+  BOOLEAN
+  ENUM
+  MULTI_ENUM
+  NUMBER
+  TEXT
+}
+
+model Attribute {
+  id       String        @id @default(uuid()) @db.Uuid
+  key      String        @unique // wheelchair_access, price_band, offers_delivery
+  label    String
+  type     AttributeType
+  options  Json? // for ENUM / MULTI_ENUM
+  isFilter Boolean       @default(false) @map("is_filter")
+
+  categories CategoryAttribute[]
+  values     BusinessAttributeValue[]
+
+  @@map("attributes")
+}
+
+model CategoryAttribute {
+  categoryId  String @map("category_id") @db.Uuid
+  attributeId String @map("attribute_id") @db.Uuid
+
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@id([categoryId, attributeId])
+  @@map("category_attributes")
+}
+
+// ─────────────────────────────────────────────────────────────
+// BUSINESSES
+// ─────────────────────────────────────────────────────────────
+
+enum ListingStatus {
+  IMPORTED // created by prospecting, never claimed
+  PENDING // submitted, awaiting moderation
+  ACTIVE
+  NEEDS_CHANGES
+  REJECTED
+  SUSPENDED
+}
+
+enum ClaimState {
+  UNCLAIMED
+  CLAIM_INVITED
+  CLAIM_STARTED
+  CLAIMED
+}
+
+model Business {
+  id          String  @id @default(uuid()) @db.Uuid
+  slug        String  @unique
+  legalName   String? @map("legal_name")
+  tradingName String  @map("trading_name")
+  summary     String? @db.VarChar(280)
+  description String?
+  websiteUrl  String? @map("website_url")
+  logoUrl     String? @map("logo_url")
+  coverUrl    String? @map("cover_url")
+
+  status     ListingStatus @default(IMPORTED)
+  claimState ClaimState    @default(UNCLAIMED) @map("claim_state")
+  verifiedAt DateTime?     @map("verified_at")
+
+  // Provenance for imported records — required by the prospecting workflow.
+  sourceKind String? @map("source_kind") // csv_import, api_ingest, self_submitted
+  sourceRef  String? @map("source_ref")
+
+  locations    BusinessLocation[]
+  categories   BusinessCategory[]
+  attributes   BusinessAttributeValue[]
+  owners       BusinessOwner[]
+  team         BusinessTeamMember[]
+  claims       ListingClaim[]
+  placements   DirectoryPlacement[]
+  services     ServiceProduct[]
+  media        MediaAsset[]
+  reviews      Review[]
+  offers       Offer[]
+  events       Event[]
+  enquiries    Enquiry[]
+  subscription Subscription?
+  externalIds  ExternalIdMapping[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([status, claimState])
+  @@map("businesses")
+}
+
+model BusinessLocation {
+  id         String  @id @default(uuid()) @db.Uuid
+  businessId String  @map("business_id") @db.Uuid
+  label      String? // "Alton branch"
+  isPrimary  Boolean @default(false) @map("is_primary")
+
+  addressLine1 String? @map("address_line1")
+  addressLine2 String? @map("address_line2")
+  locality     String?
+  postcode     String?
+  countryCode  String  @default("GB") @map("country_code")
+  placeId      String? @map("place_id") @db.Uuid
+
+  point Unsupported("geography(Point,4326)")?
+
+  phone String?
+  email String?
+
+  serviceRadiusMeters Int?    @map("service_radius_meters")
+  offersDelivery      Boolean @default(false) @map("offers_delivery")
+  isRemoteOnly        Boolean @default(false) @map("is_remote_only")
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  place        Place?        @relation(fields: [placeId], references: [id])
+  openingHours OpeningHour[]
+  specialHours SpecialHour[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId])
+  @@index([placeId])
+  @@map("business_locations")
+}
+
+model BusinessCategory {
+  businessId String  @map("business_id") @db.Uuid
+  categoryId String  @map("category_id") @db.Uuid
+  isPrimary  Boolean @default(false) @map("is_primary")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([businessId, categoryId])
+  @@index([categoryId])
+  @@map("business_categories")
+}
+
+model BusinessAttributeValue {
+  businessId  String @map("business_id") @db.Uuid
+  attributeId String @map("attribute_id") @db.Uuid
+  value       Json
+
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@id([businessId, attributeId])
+  @@map("business_attribute_values")
+}
+
+model BusinessOwner {
+  businessId String   @map("business_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  grantedAt  DateTime @default(now()) @map("granted_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([businessId, userId])
+  @@map("business_owners")
+}
+
+model BusinessTeamMember {
+  id          String    @id @default(uuid()) @db.Uuid
+  businessId  String    @map("business_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  permissions String[] // business-scoped permission keys
+  invitedAt   DateTime  @default(now()) @map("invited_at")
+  acceptedAt  DateTime? @map("accepted_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@map("business_team_members")
+}
+
+enum ClaimStatus {
+  STARTED
+  EVIDENCE_SUBMITTED
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum ClaimMethod {
+  EMAIL_DOMAIN
+  PHONE_OTP
+  DOCUMENT
+  ADMIN_REVIEW
+}
+
+model ListingClaim {
+  id         String       @id @default(uuid()) @db.Uuid
+  businessId String       @map("business_id") @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  status     ClaimStatus  @default(STARTED)
+  method     ClaimMethod?
+
+  tokenHash String?   @unique @map("token_hash") // secure expiring claim link
+  expiresAt DateTime? @map("expires_at")
+
+  evidence        Json? // document refs, OTP outcome, domain match detail
+  reviewedBy      String?   @map("reviewed_by") @db.Uuid
+  reviewedAt      DateTime? @map("reviewed_at")
+  rejectionReason String?   @map("rejection_reason")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("listing_claims")
+}
+
+// ─────────────────────────────────────────────────────────────
+// PLACEMENT — the tenant visibility join
+// ─────────────────────────────────────────────────────────────
+
+enum PlacementSubject {
+  BUSINESS
+  OFFER
+  EVENT
+  CONTENT
+}
+
+enum PlacementStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  REMOVED
+}
+
+// Canonical vs syndicated matters for SEO: only the canonical placement
+// emits an indexable page; others canonical back to it.
+model DirectoryPlacement {
+  id        String           @id @default(uuid()) @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
+  subject   PlacementSubject
+  subjectId String           @map("subject_id") @db.Uuid
+
+  status       PlacementStatus @default(REQUESTED)
+  isCanonical  Boolean         @default(false) @map("is_canonical")
+  isFeatured   Boolean         @default(false) @map("is_featured")
+  featuredFrom DateTime?       @map("featured_from")
+  featuredTo   DateTime?       @map("featured_to")
+  isSponsored  Boolean         @default(false) @map("is_sponsored")
+
+  // Tenant-specific editorial override so syndicated pages aren't duplicates.
+  localHeadline String? @map("local_headline")
+  localBlurb    String? @map("local_blurb")
+
+  requestedBy String?   @map("requested_by") @db.Uuid
+  reviewedBy  String?   @map("reviewed_by") @db.Uuid
+  reviewedAt  DateTime? @map("reviewed_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  business Business? @relation(fields: [subjectId], references: [id], onDelete: Cascade, map: "placement_business_fk")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, subject, subjectId])
+  @@index([tenantId, subject, status])
+  @@index([subject, subjectId])
+  @@map("directory_placements")
+}
+
+// ─────────────────────────────────────────────────────────────
+// HOURS, SERVICES, MEDIA
+// ─────────────────────────────────────────────────────────────
+
+model OpeningHour {
+  id         String  @id @default(uuid()) @db.Uuid
+  locationId String  @map("location_id") @db.Uuid
+  dayOfWeek  Int     @map("day_of_week") // 0=Sunday
+  opensAt    String  @map("opens_at") // "09:00" local to tenant tz
+  closesAt   String  @map("closes_at")
+  isClosed   Boolean @default(false) @map("is_closed")
+
+  location BusinessLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId])
+  @@map("opening_hours")
+}
+
+model SpecialHour {
+  id         String   @id @default(uuid()) @db.Uuid
+  locationId String   @map("location_id") @db.Uuid
+  date       DateTime @db.Date
+  opensAt    String?  @map("opens_at")
+  closesAt   String?  @map("closes_at")
+  isClosed   Boolean  @default(false) @map("is_closed")
+  note       String?
+
+  location BusinessLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, date])
+  @@map("special_hours")
+}
+
+model ServiceProduct {
+  id          String  @id @default(uuid()) @db.Uuid
+  businessId  String  @map("business_id") @db.Uuid
+  name        String
+  description String?
+  priceMinor  Int?    @map("price_minor")
+  currency    String  @default("GBP")
+  isFromPrice Boolean @default(false) @map("is_from_price")
+  imageUrl    String? @map("image_url")
+  ctaLabel    String? @map("cta_label")
+  ctaUrl      String? @map("cta_url")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@map("services_products")
+}
+
+enum MediaKind {
+  LOGO
+  COVER
+  GALLERY
+  DOCUMENT
+  VIDEO_EMBED
+}
+
+model MediaAsset {
+  id         String    @id @default(uuid()) @db.Uuid
+  businessId String?   @map("business_id") @db.Uuid
+  kind       MediaKind
+  url        String
+  altText    String?   @map("alt_text")
+  width      Int?
+  height     Int?
+  byteSize   Int?      @map("byte_size")
+  mimeType   String?   @map("mime_type")
+  sortOrder  Int       @default(0) @map("sort_order")
+
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, kind])
+  @@map("media_assets")
+}
+
+// ─────────────────────────────────────────────────────────────
+// REVIEWS
+// ─────────────────────────────────────────────────────────────
+
+enum ReviewProvider {
+  FIRST_PARTY
+  GOOGLE
+  TRUSTPILOT
+  REVIEWS_IO
+  FACEBOOK
+  BUSINESS_TESTIMONIAL // must be labelled, never "verified"
+}
+
+enum ModerationState {
+  PENDING
+  APPROVED
+  REJECTED
+  HIDDEN
+}
+
+model Review {
+  id                String         @id @default(uuid()) @db.Uuid
+  businessId        String         @map("business_id") @db.Uuid
+  provider          ReviewProvider
+  providerReviewId  String?        @map("provider_review_id")
+  providerAccountId String?        @map("provider_account_id") // which connected account produced it
+
+  rating          Float
+  ratingScaleMax  Int      @default(5) @map("rating_scale_max")
+  title           String?
+  body            String?
+  authorName      String?  @map("author_name")
+  authorAvatarUrl String?  @map("author_avatar_url")
+  reviewedAt      DateTime @map("reviewed_at")
+  sourceUrl       String?  @map("source_url")
+
+  userId String? @map("user_id") @db.Uuid // first-party only
+
+  moderationState ModerationState @default(PENDING) @map("moderation_state")
+  syncedAt        DateTime?       @map("synced_at")
+
+  business Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User?           @relation(fields: [userId], references: [id])
+  response ReviewResponse?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Deduplication guarantee across syncs.
+  @@unique([provider, providerAccountId, providerReviewId])
+  @@index([businessId, moderationState])
+  @@map("reviews")
+}
+
+model ReviewResponse {
+  id               String    @id @default(uuid()) @db.Uuid
+  reviewId         String    @unique @map("review_id") @db.Uuid
+  body             String
+  authorUserId     String?   @map("author_user_id") @db.Uuid
+  isAiDrafted      Boolean   @default(false) @map("is_ai_drafted")
+  approvedAt       DateTime? @map("approved_at")
+  publishedAt      DateTime? @map("published_at")
+  providerSyncedAt DateTime? @map("provider_synced_at")
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("review_responses")
+}
+
+model ReviewSyncRun {
+  id           String    @id @default(uuid()) @db.Uuid
+  connectionId String    @map("connection_id") @db.Uuid
+  startedAt    DateTime  @default(now()) @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  fetched      Int       @default(0)
+  created      Int       @default(0)
+  duplicates   Int       @default(0)
+  errorMessage String?   @map("error_message")
+
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, startedAt])
+  @@map("review_sync_runs")
+}
+
+// ─────────────────────────────────────────────────────────────
+// OFFERS
+// ─────────────────────────────────────────────────────────────
+
+enum OfferType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_ITEM
+  BUNDLE
+  MEMBER_EXCLUSIVE
+  INFORMATIONAL
+}
+
+enum OfferAudience {
+  PUBLIC
+  MEMBERS_ONLY
+}
+
+model Offer {
+  id          String        @id @default(uuid()) @db.Uuid
+  businessId  String        @map("business_id") @db.Uuid
+  slug        String        @unique
+  title       String
+  description String?
+  type        OfferType
+  audience    OfferAudience @default(PUBLIC)
+
+  percentOff     Int?   @map("percent_off")
+  amountOffMinor Int?   @map("amount_off_minor")
+  currency       String @default("GBP")
+  minSpendMinor  Int?   @map("min_spend_minor")
+
+  startsAt      DateTime @map("starts_at")
+  endsAt        DateTime @map("ends_at")
+  totalQuantity Int?     @map("total_quantity")
+  perUserLimit  Int      @default(1) @map("per_user_limit")
+  terms         String?
+
+  status ListingStatus @default(PENDING)
+
+  business Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  codes    OfferCode[]
+  claims   OfferClaim[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId, status])
+  @@index([startsAt, endsAt])
+  @@map("offers")
+}
+
+model OfferCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  offerId   String    @map("offer_id") @db.Uuid
+  code      String
+  isGeneric Boolean   @default(false) @map("is_generic")
+  claimedAt DateTime? @map("claimed_at")
+
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, code])
+  @@map("offer_codes")
+}
+
+model OfferClaim {
+  id              String    @id @default(uuid()) @db.Uuid
+  offerId         String    @map("offer_id") @db.Uuid
+  userId          String?   @map("user_id") @db.Uuid
+  guestEmail      String?   @map("guest_email")
+  guestVerifiedAt DateTime? @map("guest_verified_at")
+
+  code      String
+  qrPayload String?  @map("qr_payload")
+  claimedAt DateTime @default(now()) @map("claimed_at")
+
+  offer      Offer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  user       User?       @relation(fields: [userId], references: [id])
+  redemption Redemption?
+
+  @@unique([offerId, userId])
+  @@index([offerId])
+  @@map("offer_claims")
+}
+
+// One row per claim, enforced by unique FK — prevents double redemption.
+model Redemption {
+  id               String   @id @default(uuid()) @db.Uuid
+  claimId          String   @unique @map("claim_id") @db.Uuid
+  redeemedAt       DateTime @default(now()) @map("redeemed_at")
+  redeemedByUserId String?  @map("redeemed_by_user_id") @db.Uuid
+  locationId       String?  @map("location_id") @db.Uuid
+  note             String?
+
+  claim OfferClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@map("redemptions")
+}
+
+// ─────────────────────────────────────────────────────────────
+// EVENTS
+// ─────────────────────────────────────────────────────────────
+
+model Event {
+  id          String  @id @default(uuid()) @db.Uuid
+  businessId  String? @map("business_id") @db.Uuid
+  slug        String  @unique
+  title       String
+  description String?
+  coverUrl    String? @map("cover_url")
+
+  venueName    String?                               @map("venue_name")
+  addressLine1 String?                               @map("address_line1")
+  postcode     String?
+  placeId      String?                               @map("place_id") @db.Uuid
+  point        Unsupported("geography(Point,4326)")?
+
+  timezone       String  @default("Europe/London")
+  isRecurring    Boolean @default(false) @map("is_recurring")
+  recurrenceRule String? @map("recurrence_rule") // RFC 5545 RRULE
+
+  priceMinor     Int?    @map("price_minor")
+  currency       String  @default("GBP")
+  bookingUrl     String? @map("booking_url")
+  capacity       Int?
+  ageSuitability String? @map("age_suitability")
+  isAccessible   Boolean @default(false) @map("is_accessible")
+
+  status ListingStatus @default(PENDING)
+
+  business    Business?         @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  occurrences EventOccurrence[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([status])
+  @@map("events")
+}
+
+model EventOccurrence {
+  id          String   @id @default(uuid()) @db.Uuid
+  eventId     String   @map("event_id") @db.Uuid
+  startsAt    DateTime @map("starts_at")
+  endsAt      DateTime @map("ends_at")
+  isCancelled Boolean  @default(false) @map("is_cancelled")
+
+  event Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  rsvps Rsvp[]
+
+  @@index([eventId, startsAt])
+  @@index([startsAt])
+  @@map("event_occurrences")
+}
+
+model Rsvp {
+  id           String   @id @default(uuid()) @db.Uuid
+  occurrenceId String   @map("occurrence_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  guestCount   Int      @default(1) @map("guest_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  occurrence EventOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([occurrenceId, userId])
+  @@map("rsvps")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONTENT
+// ─────────────────────────────────────────────────────────────
+
+enum ContentKind {
+  BLOG
+  NEWS
+  GUIDE
+  SPOTLIGHT
+  WHATS_ON
+  JOB
+  ANNOUNCEMENT
+}
+
+enum ContentStatus {
+  DRAFT
+  IN_REVIEW
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+model ContentItem {
+  id               String        @id @default(uuid()) @db.Uuid
+  kind             ContentKind
+  slug             String        @unique
+  title            String
+  excerpt          String?
+  bodyBlocks       Json          @map("body_blocks") // block editor document
+  featuredImageUrl String?       @map("featured_image_url")
+  authorUserId     String?       @map("author_user_id") @db.Uuid
+  status           ContentStatus @default(DRAFT)
+  publishedAt      DateTime?     @map("published_at")
+  scheduledFor     DateTime?     @map("scheduled_for")
+
+  revisions ContentRevision[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([kind, status, publishedAt])
+  @@map("content_items")
+}
+
+model ContentRevision {
+  id           String   @id @default(uuid()) @db.Uuid
+  contentId    String   @map("content_id") @db.Uuid
+  version      Int
+  snapshot     Json
+  authorUserId String?  @map("author_user_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  content ContentItem @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@unique([contentId, version])
+  @@map("content_revisions")
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMMUNITY SIGNALS
+// ─────────────────────────────────────────────────────────────
+
+enum SubjectKind {
+  BUSINESS
+  OFFER
+  EVENT
+  CONTENT
+  CATEGORY
+  PLACE
+}
+
+model Favourite {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  subject   SubjectKind
+  subjectId String      @map("subject_id") @db.Uuid
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, subject, subjectId])
+  @@map("favourites")
+}
+
+model Follow {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  subject   SubjectKind
+  subjectId String      @map("subject_id") @db.Uuid
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, subject, subjectId])
+  @@map("follows")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ENQUIRIES
+// ─────────────────────────────────────────────────────────────
+
+enum EnquiryKind {
+  MESSAGE
+  QUOTE_REQUEST
+  BOOKING
+  CHATBOT_HANDOFF
+}
+
+enum EnquiryStatus {
+  NEW
+  READ
+  RESPONDED
+  CLOSED
+  SPAM
+}
+
+model Enquiry {
+  id         String        @id @default(uuid()) @db.Uuid
+  businessId String        @map("business_id") @db.Uuid
+  tenantId   String?       @map("tenant_id") @db.Uuid
+  userId     String?       @map("user_id") @db.Uuid
+  kind       EnquiryKind   @default(MESSAGE)
+  status     EnquiryStatus @default(NEW)
+
+  name    String
+  email   String
+  phone   String?
+  message String
+  meta    Json?
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("enquiries")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONSENT & NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────
+
+enum Channel {
+  EMAIL
+  SMS
+  WHATSAPP
+  PUSH
+  IN_APP
+}
+
+// UK GDPR / PECR: purpose + channel + exact wording version + withdrawal.
+model ConsentRecord {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String?   @map("user_id") @db.Uuid
+  email          String?
+  purpose        String // marketing_newsletter, offer_alerts, service_updates
+  channel        Channel
+  lawfulBasis    String    @map("lawful_basis") // consent, legitimate_interest, contract
+  wordingVersion String    @map("wording_version")
+  wordingText    String    @map("wording_text")
+  grantedAt      DateTime? @map("granted_at")
+  withdrawnAt    DateTime? @map("withdrawn_at")
+  ipAddress      String?   @map("ip_address")
+  userAgent      String?   @map("user_agent")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, purpose, channel])
+  @@index([email])
+  @@map("consent_records")
+}
+
+model NotificationPreference {
+  id              String  @id @default(uuid()) @db.Uuid
+  userId          String  @map("user_id") @db.Uuid
+  channel         Channel
+  topic           String // weekly_digest, new_offer, event_reminder
+  enabled         Boolean @default(true)
+  quietHoursStart String? @map("quiet_hours_start")
+  quietHoursEnd   String? @map("quiet_hours_end")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channel, topic])
+  @@map("notification_preferences")
+}
+
+model NewsletterSubscription {
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @map("tenant_id") @db.Uuid
+  userId               String?   @map("user_id") @db.Uuid
+  email                String
+  placeId              String?   @map("place_id") @db.Uuid
+  interestCategoryIds  String[]  @map("interest_category_ids") @db.Uuid
+  confirmedAt          DateTime? @map("confirmed_at")
+  unsubscribedAt       DateTime? @map("unsubscribed_at")
+  unsubscribeTokenHash String    @unique @map("unsubscribe_token_hash")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, email])
+  @@map("newsletter_subscriptions")
+}
+
+// ─────────────────────────────────────────────────────────────
+// PLANS & BILLING
+// ─────────────────────────────────────────────────────────────
+
+model Plan {
+  id                   String  @id @default(uuid()) @db.Uuid
+  tenantId             String? @map("tenant_id") @db.Uuid // null = platform-wide template
+  key                  String
+  name                 String
+  description          String?
+  priceMinorMonthly    Int     @default(0) @map("price_minor_monthly")
+  priceMinorYearly     Int?    @map("price_minor_yearly")
+  currency             String  @default("GBP")
+  stripeProductId      String? @map("stripe_product_id")
+  stripePriceIdMonthly String? @map("stripe_price_id_monthly")
+  stripePriceIdYearly  String? @map("stripe_price_id_yearly")
+  isEnquiryOnly        Boolean @default(false) @map("is_enquiry_only")
+  sortOrder            Int     @default(0) @map("sort_order")
+  isActive             Boolean @default(true) @map("is_active")
+
+  tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  features      PlanFeature[]
+  subscriptions Subscription[]
+
+  @@unique([tenantId, key])
+  @@map("plans")
+}
+
+enum FeatureValueType {
+  BOOLEAN
+  LIMIT
+}
+
+// Entitlements: boolean flags and numeric limits with reset periods.
+model PlanFeature {
+  id          String           @id @default(uuid()) @db.Uuid
+  planId      String           @map("plan_id") @db.Uuid
+  featureKey  String           @map("feature_key") // offers.create, images.max, analytics.advanced
+  valueType   FeatureValueType @map("value_type")
+  boolValue   Boolean?         @map("bool_value")
+  limitValue  Int?             @map("limit_value")
+  resetPeriod String?          @map("reset_period") // month, year, null = absolute
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, featureKey])
+  @@map("plan_features")
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  INCOMPLETE
+  REFUNDED
+}
+
+model Subscription {
+  id         String             @id @default(uuid()) @db.Uuid
+  businessId String             @unique @map("business_id") @db.Uuid
+  planId     String             @map("plan_id") @db.Uuid
+  status     SubscriptionStatus @default(INCOMPLETE)
+
+  stripeCustomerId     String? @map("stripe_customer_id")
+  stripeSubscriptionId String? @unique @map("stripe_subscription_id")
+
+  currentPeriodStart DateTime? @map("current_period_start")
+  currentPeriodEnd   DateTime? @map("current_period_end")
+  trialEndsAt        DateTime? @map("trial_ends_at")
+  cancelledAt        DateTime? @map("cancelled_at")
+
+  business Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  plan     Plan           @relation(fields: [planId], references: [id])
+  usage    FeatureUsage[]
+  invoices Invoice[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model FeatureUsage {
+  id             String   @id @default(uuid()) @db.Uuid
+  subscriptionId String   @map("subscription_id") @db.Uuid
+  featureKey     String   @map("feature_key")
+  periodStart    DateTime @map("period_start")
+  used           Int      @default(0)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, featureKey, periodStart])
+  @@map("feature_usage")
+}
+
+model Invoice {
+  id              String   @id @default(uuid()) @db.Uuid
+  subscriptionId  String   @map("subscription_id") @db.Uuid
+  stripeInvoiceId String   @unique @map("stripe_invoice_id")
+  amountMinor     Int      @map("amount_minor")
+  currency        String   @default("GBP")
+  status          String
+  hostedUrl       String?  @map("hosted_url")
+  issuedAt        DateTime @map("issued_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@map("invoices")
+}
+
+// ─────────────────────────────────────────────────────────────
+// INTEGRATIONS
+// ─────────────────────────────────────────────────────────────
+
+enum ConnectionStatus {
+  DISCONNECTED
+  CONNECTED
+  ERROR
+  MOCK // sandbox mode with clearly-labelled sample data
+}
+
+model IntegrationConnection {
+  id         String  @id @default(uuid()) @db.Uuid
+  tenantId   String? @map("tenant_id") @db.Uuid
+  businessId String? @map("business_id") @db.Uuid
+  provider   String // ghl, google_business_profile, stripe, google_maps, make, n8n
+
+  status               ConnectionStatus @default(DISCONNECTED)
+  // Ciphertext only. Never returned to the browser.
+  credentialsEncrypted Bytes?           @map("credentials_encrypted")
+  scopes               String[]
+  externalAccountId    String?          @map("external_account_id")
+  fieldMappings        Json?            @map("field_mappings")
+  syncDirection        String?          @map("sync_direction") // inbound, outbound, bidirectional
+  lastSuccessAt        DateTime?        @map("last_success_at")
+  lastErrorAt          DateTime?        @map("last_error_at")
+  lastErrorMessage     String?          @map("last_error_message")
+  tokenExpiresAt       DateTime?        @map("token_expires_at")
+
+  tenant   Tenant?         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  syncRuns ReviewSyncRun[]
+  jobs     SyncJob[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, businessId, provider])
+  @@index([provider, status])
+  @@map("integration_connections")
+}
+
+// Every external ID carries provider + account context.
+model ExternalIdMapping {
+  id         String @id @default(uuid()) @db.Uuid
+  provider   String
+  accountRef String @map("account_ref") // GHL location id, Google account id
+  entityKind String @map("entity_kind") // business, user, offer_claim
+  internalId String @map("internal_id") @db.Uuid
+  externalId String @map("external_id")
+
+  businessId String?   @map("business_id") @db.Uuid
+  business   Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, accountRef, entityKind, internalId])
+  @@unique([provider, accountRef, entityKind, externalId])
+  @@map("external_id_mappings")
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  DEAD_LETTER
+}
+
+model SyncJob {
+  id             String    @id @default(uuid()) @db.Uuid
+  connectionId   String?   @map("connection_id") @db.Uuid
+  jobKey         String    @map("job_key") // ghl.upsert_contact, gbp.sync_reviews
+  // Idempotency: repeated deliveries of the same logical event collapse.
+  idempotencyKey String    @unique @map("idempotency_key")
+  payload        Json
+  status         JobStatus @default(QUEUED)
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(6) @map("max_attempts")
+  nextRunAt      DateTime  @default(now()) @map("next_run_at")
+  lastError      String?   @map("last_error")
+  // Loop prevention: don't re-emit events we ourselves ingested.
+  originSystem   String?   @map("origin_system")
+  originVersion  Int?      @map("origin_version")
+
+  connection IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, nextRunAt])
+  @@map("sync_jobs")
+}
+
+model WebhookEndpoint {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String?  @map("tenant_id") @db.Uuid
+  url        String
+  events     String[]
+  secretHash String   @map("secret_hash")
+  isActive   Boolean  @default(true) @map("is_active")
+
+  deliveries WebhookDelivery[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id           String    @id @default(uuid()) @db.Uuid
+  endpointId   String    @map("endpoint_id") @db.Uuid
+  eventKey     String    @map("event_key")
+  payload      Json
+  status       JobStatus @default(QUEUED)
+  attempts     Int       @default(0)
+  responseCode Int?      @map("response_code")
+  responseBody String?   @map("response_body")
+  deliveredAt  DateTime? @map("delivered_at")
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([endpointId, status])
+  @@map("webhook_deliveries")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String?   @map("tenant_id") @db.Uuid
+  label      String
+  keyHash    String    @unique @map("key_hash") // shown once at creation, hashed at rest
+  prefix     String // display fragment, e.g. "lih_live_a1b2"
+  scopes     String[]
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("api_keys")
+}
+
+// ─────────────────────────────────────────────────────────────
+// PAGES / BLOCKS
+// ─────────────────────────────────────────────────────────────
+
+model Page {
+  id              String  @id @default(uuid()) @db.Uuid
+  tenantId        String  @map("tenant_id") @db.Uuid
+  slug            String
+  title           String
+  metaTitle       String? @map("meta_title")
+  metaDescription String? @map("meta_description")
+  isPublished     Boolean @default(false) @map("is_published")
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  blocks PageBlock[]
+
+  @@unique([tenantId, slug])
+  @@map("pages")
+}
+
+// Block config is validated against a per-type schema server-side.
+// No arbitrary HTML/script is accepted.
+model PageBlock {
+  id          String    @id @default(uuid()) @db.Uuid
+  pageId      String    @map("page_id") @db.Uuid
+  blockType   String    @map("block_type") // hero, search, category_grid, featured_listings ...
+  config      Json
+  sortOrder   Int       @default(0) @map("sort_order")
+  isVisible   Boolean   @default(true) @map("is_visible")
+  visibleFrom DateTime? @map("visible_from")
+  visibleTo   DateTime? @map("visible_to")
+
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([pageId, sortOrder])
+  @@map("page_blocks")
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODERATION, ANALYTICS, AUDIT
+// ─────────────────────────────────────────────────────────────
+
+model ModerationReport {
+  id             String          @id @default(uuid()) @db.Uuid
+  subject        SubjectKind
+  subjectId      String          @map("subject_id") @db.Uuid
+  reporterUserId String?         @map("reporter_user_id") @db.Uuid
+  reporterEmail  String?         @map("reporter_email")
+  reason         String
+  detail         String?
+  status         ModerationState @default(PENDING)
+  resolvedBy     String?         @map("resolved_by") @db.Uuid
+  resolvedAt     DateTime?       @map("resolved_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([status, subject])
+  @@map("moderation_reports")
+}
+
+model AnalyticsEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid
+  businessId  String?  @map("business_id") @db.Uuid
+  eventKey    String   @map("event_key") // profile_view, cta_call_click, search_performed
+  sessionHash String?  @map("session_hash")
+  properties  Json?
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+
+  @@index([tenantId, eventKey, occurredAt])
+  @@index([businessId, eventKey, occurredAt])
+  @@map("analytics_events")
+}
+
+model DailyAnalyticsRollup {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String?  @map("tenant_id") @db.Uuid
+  businessId String?  @map("business_id") @db.Uuid
+  day        DateTime @db.Date
+  eventKey   String   @map("event_key")
+  count      Int      @default(0)
+
+  @@unique([tenantId, businessId, day, eventKey])
+  @@index([day])
+  @@map("daily_analytics_rollups")
+}
+
+model AuditLog {
+  id                  String   @id @default(uuid()) @db.Uuid
+  actorUserId         String?  @map("actor_user_id") @db.Uuid
+  // Set when acting through time-limited, audited support impersonation.
+  impersonatedUserId  String?  @map("impersonated_user_id") @db.Uuid
+  impersonationReason String?  @map("impersonation_reason")
+  tenantId            String?  @map("tenant_id") @db.Uuid
+  action              String // claim.approved, plan.changed, integration.disconnected
+  subject             String
+  subjectId           String?  @map("subject_id") @db.Uuid
+  before              Json?
+  after               Json?
+  ipAddress           String?  @map("ip_address")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([subject, subjectId])
+  @@map("audit_logs")
+}
+
+model FeatureFlag {
+  id       String  @id @default(uuid()) @db.Uuid
+  key      String  @unique
+  tenantId String? @map("tenant_id") @db.Uuid
+  enabled  Boolean @default(false)
+  rollout  Int     @default(0) // percentage
+
+  @@map("feature_flags")
+}
