@@ -10,6 +10,7 @@
 // flagged via sourceKind = "demo_seed".
 
 import { PrismaClient } from "@prisma/client";
+import { hashPassword } from "../lib/auth/password";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
@@ -66,6 +67,21 @@ async function main() {
       where: { roleId_permissionId: { roleId: superAdmin.id, permissionId: perm.id } },
       update: {},
       create: { roleId: superAdmin.id, permissionId: perm.id },
+    });
+  }
+
+  // Tenant Admin gets the tenant-scoped subset — never billing.refund or
+  // users.impersonate, which stay platform-only. Granting "tenants.manage"
+  // here is safe because can()'s scope check still confines a TENANT-scope
+  // assignment of it to that one tenant; it doesn't imply platform-wide
+  // tenant creation rights.
+  const tenantAdminRoleForPerms = await prisma.role.findUniqueOrThrow({ where: { key: "tenant_admin" } });
+  for (const key of ["listings.approve", "reviews.moderate", "tenants.manage"]) {
+    const perm = await prisma.permission.findUniqueOrThrow({ where: { key } });
+    await prisma.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId: tenantAdminRoleForPerms.id, permissionId: perm.id } },
+      update: {},
+      create: { roleId: tenantAdminRoleForPerms.id, permissionId: perm.id },
     });
   }
 
@@ -324,6 +340,50 @@ async function main() {
       });
     }
   }
+
+  // ── Demo accounts (Slice 2 — local testing only, never use in production)
+  async function upsertRoleAssignment(userId: string, roleId: string, tenantId: string | null, businessId: string | null) {
+    const existing = await prisma.userRoleAssignment.findFirst({ where: { userId, roleId, tenantId, businessId } });
+    if (existing) return existing;
+    return prisma.userRoleAssignment.create({ data: { userId, roleId, tenantId, businessId } });
+  }
+
+  const demoPasswordHash = await hashPassword("DemoPass123!");
+
+  await prisma.user.upsert({
+    where: { email: "member@demo.local-initiative.test" },
+    update: {},
+    create: {
+      email: "member@demo.local-initiative.test",
+      passwordHash: demoPasswordHash,
+      emailVerifiedAt: new Date(),
+    },
+  });
+
+  const demoTenantAdmin = await prisma.user.upsert({
+    where: { email: "hampshire-admin@demo.local-initiative.test" },
+    update: {},
+    create: {
+      email: "hampshire-admin@demo.local-initiative.test",
+      passwordHash: demoPasswordHash,
+      emailVerifiedAt: new Date(),
+    },
+  });
+  const tenantAdminRole = await prisma.role.findUniqueOrThrow({ where: { key: "tenant_admin" } });
+  await upsertRoleAssignment(demoTenantAdmin.id, tenantAdminRole.id, hampshireTenant.id, null);
+
+  // Deliberately NOT MFA-enrolled — logging in demonstrates the mandatory
+  // forced-enrolment flow for PLATFORM-scope roles (BUILD-BRIEF Slice 2).
+  const demoSuperAdmin = await prisma.user.upsert({
+    where: { email: "super-admin@demo.local-initiative.test" },
+    update: {},
+    create: {
+      email: "super-admin@demo.local-initiative.test",
+      passwordHash: demoPasswordHash,
+      emailVerifiedAt: new Date(),
+    },
+  });
+  await upsertRoleAssignment(demoSuperAdmin.id, superAdmin.id, null, null);
 
   // ── Demo businesses ──────────────────────────────────────────────────────
   type DemoBusiness = {

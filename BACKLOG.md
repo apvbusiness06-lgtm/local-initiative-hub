@@ -5,12 +5,28 @@ now per `BUILD-BRIEF.md` rule 4 ("never widen scope mid-slice").
 
 ## Immediate next slice
 
-**Slice 2 — Auth and accounts** is next. Slices 1 and 4 (tenant isolation,
-search) were built first because the brief flags them as highest-risk;
-Slice 2 blocks everything after it (claim flow, business portal, admin,
-reviews all need real sessions and `can(user, permission, subject)`).
+**Slice 5 — Listing page** is next (or Slice 7/business portal — either
+extends naturally from auth now being real). Slices 1, 4 and 2 were built
+first because the brief flags them as highest-risk/blocking; every
+remaining slice needs real sessions and `can()`, which now exist.
 
 ## Within already-built slices
+
+- **MFA backup codes.** Enrolment and the login challenge both work
+  (TOTP, RFC 6238-verified), but there's no recovery path if a user loses
+  their authenticator device. Needs a `BackupCode` model or a hashed-codes
+  array on `User` — deliberately left out to avoid widening Slice 2 further.
+- **Resend verification email.** A verification link that's expired or
+  already used shows an error with no way to request a new one short of
+  registering again (which now correctly fails with "account already
+  exists"). Small, self-contained addition.
+- **Real transactional email.** `lib/mailer.ts`'s `ConsoleSandboxMailer` is
+  the only adapter — every "sent" email is a console log line plus (for
+  registration only) an inline sandbox link. Connecting a real provider
+  means implementing `Mailer` against it; nothing else changes.
+- **Session listing / "log out everywhere".** `Session` rows exist and
+  `destroyAllSessionsForUser` is already used by password reset, but there's
+  no UI for a user to see or revoke their own other active sessions.
 
 - **Map UI (Slice 4).** `search.ts` returns `lat`/`lng`/`distanceMeters` per
   hit and the list view is complete, but there's no `MapProvider` interface

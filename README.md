@@ -15,7 +15,7 @@ sequence and `BACKLOG.md` for what's deliberately not built yet.
 |---|---|---|
 | 0 | Foundation (Next.js, Prisma, CI) | ✅ Done |
 | 1 | Tenant resolution + RLS isolation | ✅ Done |
-| 2 | Auth and accounts | ⬜ Not started |
+| 2 | Auth and accounts | ✅ Done |
 | 3 | Taxonomy + UK place seed | ✅ Done |
 | 4 | Search and map | ✅ Search done; map UI not started (behind `MapProvider`, no key configured) |
 | 5–13 | Listing page, claim flow, business portal, admin, billing, offers/events, reviews, GHL, content/newsletter/analytics | ⬜ Not started |
@@ -32,10 +32,32 @@ Verified locally against a real PostgreSQL 16 + PostGIS instance:
   ranked results for two different hostnames from the same running process,
   and an unrecognised hostname gets a branded 404, never a crash or a
   default tenant.
-- 35 automated tests pass: `searchParams` round-trip/validation (31
-  assertions) and RLS tenant isolation (4 assertions) run against the
-  non-superuser `lih_app` role — the same one the app connects as at
-  runtime, not a superuser connection that would pass for the wrong reason.
+- 69 automated tests pass: `searchParams` round-trip/validation (31),
+  RLS tenant isolation (4), TOTP against all 5 RFC 6238 Appendix B vectors
+  plus round-trip/drift-tolerance cases (11), registration/verification/
+  password-reset/session-invalidation (12), and RBAC scoping including the
+  actual `checkTenantAdminAccess` guard the protected route calls (11) —
+  all run against the non-superuser `lih_app` role, not a superuser
+  connection that would pass for the wrong reason.
+- The full register → verify → login → account → logout flow, the MFA
+  forced-enrolment path for platform roles, the MFA challenge path on
+  subsequent logins, and the tenant-scoped 403 on the real
+  `/api/admin/tenants/[tenantId]` route were exercised end-to-end against
+  a live server (Playwright + curl), not just unit-tested. That's how a
+  real bug got caught: the verify-email route was building its redirect
+  from `request.url` (Next's internal origin) instead of the incoming
+  `Host` header, silently losing tenant resolution on click-through — fixed
+  in `app/api/auth/verify-email/route.ts`.
+
+## Demo accounts (Slice 2 — local testing only, never for production)
+
+Seeded by `prisma/seed.ts`, password `DemoPass123!` for all three:
+
+| Email | Role |
+|---|---|
+| `member@demo.local-initiative.test` | Community member, no admin role |
+| `hampshire-admin@demo.local-initiative.test` | `tenant_admin`, scoped to Hampshire only — gets 403 on any other tenant's admin routes |
+| `super-admin@demo.local-initiative.test` | `super_admin` (PLATFORM scope), deliberately not MFA-enrolled — logging in demonstrates the mandatory forced-enrolment flow |
 
 ## Setup
 
@@ -44,10 +66,17 @@ npm install
 cp .env.example .env.local   # fill in DATABASE_URL/DIRECT_URL etc — see below
 npx prisma generate
 npx prisma migrate dev        # or `migrate deploy` against an existing DB
-npm run db:postgis            # applies PostGIS/RLS — needs a superuser connection
+npm run db:grant              # migrations run as the DIRECT_URL superuser; grant the new tables to lih_app
 npm run db:seed
 npm run dev
 ```
+
+PostGIS extensions, spatial/FTS indexes and RLS policies are applied as
+part of the normal migration history (`prisma/migrations/*_postgis_and_rls`)
+— there's no separate manual SQL step. `db:grant` is still needed after
+every migration because migrations run as the superuser (`DIRECT_URL`) and
+Postgres doesn't retroactively extend `ALTER DEFAULT PRIVILEGES` to
+objects a *different* role created.
 
 Requires PostgreSQL 16+ with PostGIS (`postgresql-16-postgis-3` on
 Debian/Ubuntu, or use the `postgis/postgis` Docker image — see

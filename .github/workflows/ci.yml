@@ -55,7 +55,7 @@ jobs:
       - name: Prisma generate
         run: npx prisma generate
 
-      - name: Migrate (as superuser)
+      - name: Migrate (as superuser) — includes PostGIS extensions, spatial/FTS indexes and RLS policies
         run: npx prisma migrate deploy
 
       - name: Grant table privileges to the app role post-migration
@@ -63,9 +63,6 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -U postgres -d lih -c \
             "GRANT ALL ON ALL TABLES IN SCHEMA public TO lih_app;
              GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO lih_app;"
-
-      - name: Apply PostGIS extensions, spatial/FTS indexes and RLS policies
-        run: PGPASSWORD=postgres psql -h localhost -U postgres -d lih -f prisma/migrations/001_postgis_and_rls.sql
 
       - name: Seed demo data
         run: npx tsx prisma/seed.ts
