@@ -5,12 +5,23 @@
 :root {
   --ink: #302b27;
   --primary: #9b7f58;
+  --primary-dark: #7d6444;
   --surface: #fbf8f3;
 }
 
 body {
   background-color: var(--surface);
   color: var(--ink);
-  font-family:
-    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.font-heading {
+  font-family: var(--font-heading), Georgia, "Times New Roman", serif;
+}
+
+/* Subtle map-pin / dot-grid texture for hero sections — CSS only, no
+   external imagery, so it never depends on an asset that may not exist. */
+.hero-texture {
+  background-image: radial-gradient(circle at 1px 1px, rgba(48, 43, 39, 0.14) 1px, transparent 0);
+  background-size: 22px 22px;
 }

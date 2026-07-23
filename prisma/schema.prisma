@@ -104,33 +104,86 @@ model TenantBranding {
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id              String    @id @default(uuid()) @db.Uuid
-  email           String    @unique
-  emailVerifiedAt DateTime? @map("email_verified_at")
-  passwordHash    String?   @map("password_hash")
-  mfaEnrolledAt   DateTime? @map("mfa_enrolled_at")
-  lastSeenAt      DateTime? @map("last_seen_at")
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique
+  emailVerifiedAt    DateTime? @map("email_verified_at")
+  passwordHash       String?   @map("password_hash")
+  mfaEnrolledAt      DateTime? @map("mfa_enrolled_at")
+  mfaSecretEncrypted String?   @map("mfa_secret_encrypted")
+  lastSeenAt         DateTime? @map("last_seen_at")
 
-  profile         UserProfile?
-  roles           UserRoleAssignment[]
-  ownedBusinesses BusinessOwner[]
-  teamSeats       BusinessTeamMember[]
-  claims          ListingClaim[]
-  reviews         Review[]
-  favourites      Favourite[]
-  follows         Follow[]
-  offerClaims     OfferClaim[]
-  rsvps           Rsvp[]
-  enquiries       Enquiry[]
-  consents        ConsentRecord[]
-  notifPrefs      NotificationPreference[]
-  subscriptions   NewsletterSubscription[]
+  profile                 UserProfile?
+  roles                   UserRoleAssignment[]
+  ownedBusinesses         BusinessOwner[]
+  teamSeats               BusinessTeamMember[]
+  claims                  ListingClaim[]
+  reviews                 Review[]
+  favourites              Favourite[]
+  follows                 Follow[]
+  offerClaims             OfferClaim[]
+  rsvps                   Rsvp[]
+  enquiries               Enquiry[]
+  consents                ConsentRecord[]
+  notifPrefs              NotificationPreference[]
+  subscriptions           NewsletterSubscription[]
+  sessions                Session[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
   @@map("users")
+}
+
+// ── Slice 2: sessions and single-use tokens ─────────────────────
+// Server-side session validation: the cookie carries only a random token;
+// its SHA-256 hash is the lookup key here, so a leaked DB row never yields
+// a usable session token, and a leaked token can be revoked by deleting
+// the row it hashes to.
+model Session {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  tokenHash  String   @unique @map("token_hash")
+  userAgent  String?  @map("user_agent")
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  expiresAt  DateTime @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model EmailVerificationToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+model PasswordResetToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 model UserProfile {
