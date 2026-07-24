@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { PrismaClient } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { submitFirstPartyReview } from "@/lib/reviews";
+import { emitEnquiryToGhl } from "@/lib/sync";
 
 const prisma = new PrismaClient();
 
@@ -32,7 +33,7 @@ export async function submitEnquiryAction(
 
   const user = await getCurrentUser();
 
-  await prisma.enquiry.create({
+  const enquiry = await prisma.enquiry.create({
     data: {
       businessId,
       tenantId,
@@ -44,6 +45,14 @@ export async function submitEnquiryAction(
       message,
     },
   });
+
+  // Sync the lead to the tenant's CRM (GHL) if connected. Idempotent + queued
+  // with backoff; a CRM outage never blocks the enquiry itself.
+  try {
+    await emitEnquiryToGhl({ enquiryId: enquiry.id, tenantId, name, email, phone });
+  } catch {
+    /* enqueue failure is non-fatal to the user's submission */
+  }
 
   redirect(`/listing/${slug}?enquiry=sent`);
 }

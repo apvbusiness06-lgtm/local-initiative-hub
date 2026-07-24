@@ -42,6 +42,13 @@ export async function moderateReviewAction(reviewId: string, decision: string): 
   redirect(`/admin/reviews?${result.ok ? "done=1" : `error=${encodeURIComponent(result.error ?? "failed")}`}`);
 }
 
+export async function requeueSyncJobAction(jobId: string): Promise<void> {
+  await adminGuard();
+  const { requeueJob } = await import("@/lib/sync");
+  await requeueJob(jobId);
+  redirect("/admin/sync?done=1");
+}
+
 export async function togglePlacementAction(placementId: string, formData: FormData): Promise<void> {
   const { ctx, tenantId } = await adminGuard();
   const flags: { isFeatured?: boolean; isSponsored?: boolean; approve?: boolean } = {};

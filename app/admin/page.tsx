@@ -23,6 +23,7 @@ export default async function AdminDashboard() {
     { href: "/admin/claims", title: "Claim review", desc: "Ownership claims awaiting approval.", count: claims.length },
     { href: "/admin/reviews", title: "Review moderation", desc: "First-party reviews awaiting approval.", count: reviews.length },
     { href: "/admin/businesses", title: "Listings & placement", desc: "Approve, suspend, feature and sponsor listings." },
+    { href: "/admin/sync", title: "CRM sync log", desc: "Outbound GoHighLevel sync jobs, retries and dead-letters." },
   ];
   if (canImpersonate) {
     cards.push({ href: "/admin/users", title: "Users", desc: "Search users and start support impersonation." });

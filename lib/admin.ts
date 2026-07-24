@@ -227,6 +227,30 @@ export async function moderateReview(
   return { ok: true };
 }
 
+// ── Sync jobs (GHL) — per tenant, secrets already redacted at write time ──
+export interface SyncJobRow {
+  id: string;
+  jobKey: string;
+  status: string;
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  nextRunAt: Date;
+  createdAt: Date;
+}
+
+export async function syncJobsForTenant(tenantId: string, limit = 50): Promise<SyncJobRow[]> {
+  return prisma.$queryRaw<SyncJobRow[]>(Prisma.sql`
+    SELECT sj.id, sj.job_key AS "jobKey", sj.status, sj.attempts, sj.max_attempts AS "maxAttempts",
+           sj.last_error AS "lastError", sj.next_run_at AS "nextRunAt", sj.created_at AS "createdAt"
+    FROM sync_jobs sj
+    JOIN integration_connections ic ON ic.id = sj.connection_id
+    WHERE ic.tenant_id = ${tenantId}::uuid
+    ORDER BY sj.created_at DESC
+    LIMIT ${limit}
+  `);
+}
+
 // ── Users (for impersonation start) ──────────────────────────
 export interface AdminUserRow {
   id: string;
