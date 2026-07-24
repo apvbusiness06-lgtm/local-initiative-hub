@@ -30,6 +30,9 @@ export function Header({ tenant, user }: { tenant: ResolvedTenant; user: Session
           </a>
           {user ? (
             <>
+              <a href="/portal" className="opacity-80 transition hover:opacity-100">
+                My business
+              </a>
               <a href="/account" className="opacity-80 transition hover:opacity-100">
                 Account
               </a>

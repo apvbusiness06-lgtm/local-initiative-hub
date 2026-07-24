@@ -4,3 +4,7 @@ node_modules/
 .env.local
 *.log
 *.tsbuildinfo
+
+# Locally-stored uploaded media (LocalDiskStore default). In production use a
+# cloud MediaStore or a mounted volume, not the repo.
+/storage/
