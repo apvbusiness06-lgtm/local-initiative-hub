@@ -27,6 +27,7 @@ sequence and `BACKLOG.md` for what's deliberately not built yet.
 | 11 | Reviews | ✅ Done — rate-limited first-party submission with moderation (no gating), provider sync behind a `ReviewProvider` interface with structural dedup, reconnect-on-token-expiry, scale-aware aggregation |
 | 12 | GHL sync | ✅ Done — idempotent outbound job queue (backoff + dead-letter + resync), signature-verified inbound webhook, loop prevention via `originSystem`, secret-redacted per-tenant sync log |
 | 13 | Content, newsletter, analytics | ✅ Done — consent-tracked newsletter with no-login token unsubscribe, content revisions + scheduled publishing, bot-filtered analytics with nightly rollups and a business dashboard |
+| — | Launch infrastructure | ✅ Done — Dockerfile (multi-stage standalone), docker-compose (PostGIS + app), nginx reverse-proxy example, db-init script, deployment guide, SMTP mailer, security headers, LEGAL.md templates |
 
 Verified locally against a real PostgreSQL 16 + PostGIS instance:
 - `prisma migrate deploy` succeeds on an empty database.
@@ -192,6 +193,23 @@ without a matching consent record and channel preference. Review gating
 not be implemented. Manually imported testimonials must be labelled as
 business-provided and never presented as independently verified.
 
-Privacy policy and terms templates require human legal review before
-launch — none exist yet, because no page collects personal data yet
-(Slice 2 is where that starts to matter).
+Privacy policy and terms templates are in `LEGAL.md` — they are
+**drafts with placeholders** and require solicitor review before any
+version is published or real personal data is collected.
+
+## Deployment
+
+See `deploy/README.md` for full instructions. Quick start:
+
+```bash
+cp .env.example .env            # fill AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY, etc.
+docker compose up --build -d
+docker compose exec app npx prisma migrate deploy
+docker compose exec app npm run db:grant
+```
+
+Put `deploy/nginx.conf.example` in front for TLS + multi-domain routing.
+For Cloud Run, see `deploy/README.md` § Cloud Run + Cloud SQL.
+
+The pre-launch checklist in `deploy/README.md` covers secrets, RLS
+verification, Stripe/GHL webhooks, TLS, and legal review.

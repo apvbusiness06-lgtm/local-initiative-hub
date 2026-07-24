@@ -1,0 +1,60 @@
+# Local/self-hosted stack: PostGIS + the app. For Cloud Run, deploy the image
+# from the Dockerfile and point DATABASE_URL/DIRECT_URL at Cloud SQL instead.
+#
+#   docker compose up --build
+#   docker compose exec app npx prisma migrate deploy
+#   docker compose exec app npm run db:grant
+#   docker compose exec app npm run db:seed   # demo data only
+#
+# The RLS design REQUIRES the app to connect as a non-superuser
+# (lih_app) — see the db service's init below and README "Critical: RLS
+# requires a non-superuser role".
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: lih
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./deploy/db-init.sh:/docker-entrypoint-initdb.d/10-lih-app-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lih"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # App connects as the non-superuser role (RLS enforced).
+      DATABASE_URL: postgresql://lih_app:${LIH_APP_PASSWORD:-lih_app_pw}@db:5432/lih?schema=public
+      # Migrations connect as the superuser.
+      DIRECT_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/lih?schema=public
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY}
+      # Optional integrations — see .env.example.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      GHL_CLIENT_ID: ${GHL_CLIENT_ID:-}
+      GHL_CLIENT_SECRET: ${GHL_CLIENT_SECRET:-}
+      GHL_WEBHOOK_SECRET: ${GHL_WEBHOOK_SECRET:-}
+      JOBS_RUN_SECRET: ${JOBS_RUN_SECRET:-}
+      MEDIA_LOCAL_DIR: /app/storage/media
+    ports:
+      - "3000:3000"
+    volumes:
+      - media:/app/storage
+
+volumes:
+  db-data:
+  media:
