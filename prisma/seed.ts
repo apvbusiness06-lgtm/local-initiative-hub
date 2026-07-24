@@ -11,6 +11,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../lib/auth/password";
+import { generateOccurrences } from "../lib/events";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
@@ -781,6 +782,40 @@ async function main() {
       const startsAt = new Date(Date.now() + e.daysFromNow * 24 * 60 * 60 * 1000);
       const endsAt = new Date(startsAt.getTime() + e.durationHours * 60 * 60 * 1000);
       await prisma.eventOccurrence.create({ data: { eventId: event.id, startsAt, endsAt } });
+    }
+  }
+
+  // A recurring weekly event, generated through the DST-correct expander so
+  // its occurrences keep their local time across the BST boundary — real data
+  // for the Slice 10 recurrence path.
+  const fitness = businessRecords["winchester-strong-fitness"];
+  if (fitness) {
+    const recurring = await prisma.event.upsert({
+      where: { slug: "winchester-strong-weekly-bootcamp" },
+      update: {},
+      create: {
+        businessId: fitness.id,
+        slug: "winchester-strong-weekly-bootcamp",
+        title: "Weekly outdoor bootcamp",
+        description: "Every Tuesday, 10:00 — a friendly outdoor group workout on the water meadows.",
+        venueName: "Winchester Water Meadows",
+        timezone: "Europe/London",
+        isRecurring: true,
+        recurrenceRule: "FREQ=WEEKLY;INTERVAL=1;COUNT=12",
+        status: "ACTIVE",
+      },
+    });
+    const hasOccurrences = await prisma.eventOccurrence.findFirst({ where: { eventId: recurring.id } });
+    if (!hasOccurrences) {
+      // Anchor the first occurrence on the next Tuesday at 10:00 local.
+      const now = new Date();
+      const daysToTue = (2 - now.getUTCDay() + 7) % 7 || 7;
+      const first = new Date(now.getTime() + daysToTue * 24 * 60 * 60 * 1000);
+      await generateOccurrences(
+        recurring.id,
+        { year: first.getUTCFullYear(), month: first.getUTCMonth() + 1, day: first.getUTCDate(), hour: 10, minute: 0 },
+        60
+      );
     }
   }
 

@@ -116,7 +116,7 @@ export default async function HomePage() {
             {offers.map((o) => (
               <a
                 key={o.id}
-                href={`/listing/${o.businessSlug}`}
+                href={`/offers/${o.slug}`}
                 className="rounded-xl border border-black/[0.07] bg-white p-5 shadow-[0_1px_2px_rgba(48,43,39,0.04)] transition hover:shadow-[0_4px_16px_rgba(48,43,39,0.08)]"
               >
                 <span
@@ -176,7 +176,7 @@ export default async function HomePage() {
             {events.map((e) => (
               <li key={e.id}>
                 <a
-                  href={e.businessSlug ? `/listing/${e.businessSlug}` : "#"}
+                  href={`/events/${e.slug}`}
                   className="flex flex-col gap-1 rounded-xl border border-black/[0.07] bg-white p-4 shadow-[0_1px_2px_rgba(48,43,39,0.04)] transition hover:shadow-[0_4px_16px_rgba(48,43,39,0.08)] sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div>

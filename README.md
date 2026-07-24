@@ -23,7 +23,8 @@ sequence and `BACKLOG.md` for what's deliberately not built yet.
 | 7 | Business portal | ✅ Done — owner-gated editor; server-side image validation + metadata strip (sharp); entitlement limits enforced in the action layer; identity edits route to moderation |
 | 8 | Admin backend | ✅ Done — moderation queue, claim review, listing/placement management, time-limited support impersonation (banner + dual-ID audit + auto-expiry) |
 | 9 | Plans, entitlements, Stripe | ✅ Done — Checkout + billing portal; signature-verified, idempotent webhook; entitlements activate from verified webhook state; usage limits enforced in the action layer |
-| 10–13 | Offers/events, reviews, GHL, content/newsletter/analytics | ⬜ Not started (minimal `/blog` read path and homepage deals/events sections built ahead of sequence — see BACKLOG.md) |
+| 10 | Offers and events | ✅ Done — offer claim (unique code + QR), staff redemption (concurrency-safe, one redemption per claim), events with DST-correct recurrence, RSVP, add-to-calendar (.ics), Event JSON-LD |
+| 11–13 | Reviews, GHL, content/newsletter/analytics | ⬜ Not started (minimal `/blog` read path built ahead of sequence — see BACKLOG.md) |
 
 Verified locally against a real PostgreSQL 16 + PostGIS instance:
 - `prisma migrate deploy` succeeds on an empty database.

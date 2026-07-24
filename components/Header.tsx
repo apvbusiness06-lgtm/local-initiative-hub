@@ -25,6 +25,9 @@ export function Header({ tenant, user }: { tenant: ResolvedTenant; user: Session
           <a href="/businesses" className="opacity-80 transition hover:opacity-100">
             Businesses
           </a>
+          <a href="/events" className="opacity-80 transition hover:opacity-100">
+            What&apos;s on
+          </a>
           <a href="/blog" className="opacity-80 transition hover:opacity-100">
             Community
           </a>
