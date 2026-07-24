@@ -58,9 +58,14 @@ export default async function PortalEditorPage({
         </Link>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">{biz.tradingName}</h1>
-          <a href={`/listing/${biz.slug}`} className="text-sm font-medium underline" style={{ color: "var(--primary)" }}>
-            View public page →
-          </a>
+          <div className="flex items-center gap-4">
+            <a href={`/portal/${biz.id}/billing`} className="text-sm font-medium underline" style={{ color: "var(--primary)" }}>
+              Billing &amp; plan
+            </a>
+            <a href={`/listing/${biz.slug}`} className="text-sm font-medium underline" style={{ color: "var(--primary)" }}>
+              View public page →
+            </a>
+          </div>
         </div>
         <p className="mt-1 text-xs opacity-60">
           Status: {biz.status.replace("_", " ").toLowerCase()}
