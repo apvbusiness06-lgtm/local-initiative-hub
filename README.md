@@ -19,7 +19,8 @@ sequence and `BACKLOG.md` for what's deliberately not built yet.
 | 3 | Taxonomy + UK place seed | ✅ Done |
 | 4 | Search and map | ✅ Search done; map UI not started (behind `MapProvider`, no key configured) |
 | 5 | Listing page | ✅ Done — see BACKLOG.md for the OFFER/EVENT placement FK bug found while building it |
-| 6–13 | Claim flow, business portal, admin, billing, offers/events, reviews, GHL, content/newsletter/analytics | ⬜ Not started (minimal `/blog` read path and homepage deals/events sections built ahead of sequence — see BACKLOG.md) |
+| 6 | Claim flow | ✅ Done — email-possession + admin approval; ownership grant writes an AuditLog; used/expired tokens fail |
+| 7–13 | Business portal, admin, billing, offers/events, reviews, GHL, content/newsletter/analytics | ⬜ Not started (minimal `/blog` read path and homepage deals/events sections built ahead of sequence — see BACKLOG.md) |
 
 Verified locally against a real PostgreSQL 16 + PostGIS instance:
 - `prisma migrate deploy` succeeds on an empty database.

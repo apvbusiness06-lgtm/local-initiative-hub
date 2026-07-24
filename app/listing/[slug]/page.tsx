@@ -253,8 +253,26 @@ export default async function ListingPage({
                 >
                   Enquire
                 </a>
+                {listing.claimState !== "CLAIMED" && (
+                  <a
+                    href={`/claim/${listing.slug}`}
+                    className="rounded-lg border border-black/10 px-4 py-2 text-sm font-medium transition hover:bg-black/[0.03]"
+                  >
+                    Claim this listing
+                  </a>
+                )}
               </div>
             </div>
+
+            {listing.claimState !== "CLAIMED" && (
+              <p className="mt-3 text-xs opacity-60">
+                Own this business?{" "}
+                <a href={`/claim/${listing.slug}`} className="underline" style={{ color: "var(--primary)" }}>
+                  Claim your free listing
+                </a>{" "}
+                to manage details, respond to reviews and post offers.
+              </p>
+            )}
 
             {listing.localBlurb && (
               <p className="mt-4 border-t border-black/[0.06] pt-4 text-sm italic opacity-80">{listing.localBlurb}</p>
