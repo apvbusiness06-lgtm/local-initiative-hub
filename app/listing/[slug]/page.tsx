@@ -13,6 +13,7 @@ import { formatDiscount } from "@/lib/offers";
 import { isOpenNow, dayLabel, formatHoursRange, sortMondayFirst } from "@/lib/openingHours";
 import { buildLocalBusinessJsonLd } from "@/lib/jsonld";
 import { getCurrentUser } from "@/lib/auth/currentUser";
+import { recordEvent, EVENT } from "@/lib/analytics";
 import { Header } from "@/components/Header";
 import { ListingCard } from "@/components/ListingCard";
 import { submitEnquiryAction, submitReportAction, submitEditSuggestionAction, submitReviewAction } from "./actions";
@@ -93,6 +94,10 @@ export default async function ListingPage({
 
   const listing = await getListingForTenant(tenant.id, slug);
   if (!listing) notFound();
+
+  // Record a profile view (bot-filtered, fire-and-forget). A view is a view.
+  const ua = (await headers()).get("user-agent");
+  void recordEvent({ eventKey: EVENT.PROFILE_VIEW, tenantId: tenant.id, businessId: listing.id, userAgent: ua });
 
   const sp = await searchParams;
   const flag = (key: string) => (Array.isArray(sp[key]) ? sp[key]?.[0] : sp[key]);

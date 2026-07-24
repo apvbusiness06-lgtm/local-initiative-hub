@@ -59,6 +59,9 @@ export default async function PortalEditorPage({
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">{biz.tradingName}</h1>
           <div className="flex items-center gap-4">
+            <a href={`/portal/${biz.id}/insights`} className="text-sm font-medium underline" style={{ color: "var(--primary)" }}>
+              Insights
+            </a>
             <a href={`/portal/${biz.id}/billing`} className="text-sm font-medium underline" style={{ color: "var(--primary)" }}>
               Billing &amp; plan
             </a>

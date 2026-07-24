@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { submitFirstPartyReview } from "@/lib/reviews";
 import { emitEnquiryToGhl } from "@/lib/sync";
+import { recordEvent, EVENT } from "@/lib/analytics";
 
 const prisma = new PrismaClient();
 
@@ -53,6 +54,10 @@ export async function submitEnquiryAction(
   } catch {
     /* enqueue failure is non-fatal to the user's submission */
   }
+
+  // A submitted enquiry is a real on-site conversion signal (still just a
+  // submit — never counted as a won job).
+  void recordEvent({ eventKey: EVENT.CTA_ENQUIRY_SUBMIT, tenantId, businessId, userAgent: "server-action" });
 
   redirect(`/listing/${slug}?enquiry=sent`);
 }

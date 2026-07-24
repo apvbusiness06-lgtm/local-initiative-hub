@@ -26,7 +26,7 @@ sequence and `BACKLOG.md` for what's deliberately not built yet.
 | 10 | Offers and events | ✅ Done — offer claim (unique code + QR), staff redemption (concurrency-safe, one redemption per claim), events with DST-correct recurrence, RSVP, add-to-calendar (.ics), Event JSON-LD |
 | 11 | Reviews | ✅ Done — rate-limited first-party submission with moderation (no gating), provider sync behind a `ReviewProvider` interface with structural dedup, reconnect-on-token-expiry, scale-aware aggregation |
 | 12 | GHL sync | ✅ Done — idempotent outbound job queue (backoff + dead-letter + resync), signature-verified inbound webhook, loop prevention via `originSystem`, secret-redacted per-tenant sync log |
-| 13 | Content, newsletter, analytics | ⬜ Not started (minimal `/blog` read path built ahead of sequence — see BACKLOG.md) |
+| 13 | Content, newsletter, analytics | ✅ Done — consent-tracked newsletter with no-login token unsubscribe, content revisions + scheduled publishing, bot-filtered analytics with nightly rollups and a business dashboard |
 
 Verified locally against a real PostgreSQL 16 + PostGIS instance:
 - `prisma migrate deploy` succeeds on an empty database.

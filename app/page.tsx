@@ -10,6 +10,7 @@ import { getUpcomingEventsForTenant } from "@/lib/events";
 import { getPublishedContent } from "@/lib/content";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { Header } from "@/components/Header";
+import { subscribeNewsletterAction } from "@/app/newsletter/actions";
 import { ListingCard } from "@/components/ListingCard";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -28,10 +29,17 @@ export async function generateMetadata(): Promise<Metadata> {
 // design's full Slice 10/13 scope (no claim/QR redemption, no RSVP, no
 // editor). Each links to a real destination: the offer/event's business
 // listing, or the blog post itself — never a page that doesn't exist yet.
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const host = (await headers()).get("host") ?? "";
   const tenant = await resolveTenant(host);
   if (!tenant) notFound();
+
+  const sp = await searchParams;
+  const newsletterFlag = Array.isArray(sp.newsletter) ? sp.newsletter[0] : sp.newsletter;
 
   const [currentUser, categories, recent, offers, events, posts] = await Promise.all([
     getCurrentUser(),
@@ -220,6 +228,47 @@ export default async function HomePage() {
           </div>
         </section>
       )}
+
+      {/* ── Newsletter signup (consent-tracked) ───────────────── */}
+      <section className="border-t border-black/[0.06]">
+        <div className="mx-auto max-w-2xl px-5 py-14 text-center">
+          <h2 className="font-heading text-2xl font-semibold tracking-tight">Stay in the loop</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm opacity-70">
+            Local offers, events and new businesses across {tenant.name} — straight to your inbox.
+          </p>
+
+          {newsletterFlag === "subscribed" ? (
+            <p className="mx-auto mt-5 max-w-md rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
+              Thanks — you&apos;re subscribed. Check your inbox for a confirmation with a one-click unsubscribe link.
+            </p>
+          ) : (
+            <form action={subscribeNewsletterAction} className="mx-auto mt-5 max-w-md space-y-3">
+              {newsletterFlag === "consent" && (
+                <p className="rounded-lg bg-red-50 p-2 text-xs text-red-700">Please tick the consent box to subscribe.</p>
+              )}
+              {newsletterFlag === "error" && (
+                <p className="rounded-lg bg-red-50 p-2 text-xs text-red-700">Please enter a valid email address.</p>
+              )}
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  placeholder="you@example.com"
+                  className="w-full flex-1 rounded-lg border border-black/10 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-black/10"
+                />
+                <button type="submit" className="shrink-0 rounded-lg px-5 py-2.5 text-sm font-medium text-white" style={{ backgroundColor: "var(--primary)" }}>
+                  Subscribe
+                </button>
+              </div>
+              <label className="flex items-start gap-2 text-left text-xs opacity-70">
+                <input type="checkbox" name="consent" className="mt-0.5" />
+                <span>I agree to receive the {tenant.name} newsletter by email and can unsubscribe at any time.</span>
+              </label>
+            </form>
+          )}
+        </div>
+      </section>
     </main>
   );
 }
