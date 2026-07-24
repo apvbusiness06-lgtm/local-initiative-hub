@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",
+    "@supabase/supabase-js": "^2.110.8",
     "next": "^15.1.0",
     "nodemailer": "^9.0.3",
     "qrcode": "^1.5.4",

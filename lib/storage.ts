@@ -39,12 +39,59 @@ class LocalDiskStore implements MediaStore {
   }
 }
 
+// Supabase Storage adapter — uses the public URL from a Supabase Storage bucket.
+// Set MEDIA_STORAGE=supabase plus SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and
+// optionally SUPABASE_STORAGE_BUCKET (defaults to "media").
+class SupabaseStore implements MediaStore {
+  private client: import("@supabase/supabase-js").SupabaseClient | null = null;
+  private readonly bucket: string;
+  private readonly supabaseUrl: string;
+
+  constructor(supabaseUrl: string, serviceRoleKey: string, bucket: string) {
+    this.supabaseUrl = supabaseUrl;
+    this.bucket = bucket;
+    // Lazy-import to avoid loading Supabase SDK when not needed.
+    const { createClient } = require("@supabase/supabase-js");
+    this.client = createClient(supabaseUrl, serviceRoleKey);
+  }
+
+  publicUrl(key: string): string {
+    return `${this.supabaseUrl}/storage/v1/object/public/${this.bucket}/${key}`;
+  }
+
+  async put(key: string, data: Buffer, contentType: string): Promise<StoredObject> {
+    const { error } = await this.client!.storage
+      .from(this.bucket)
+      .upload(key, data, { contentType, upsert: true });
+    if (error) throw new Error(`Supabase Storage upload failed: ${error.message}`);
+    return { key, url: this.publicUrl(key) };
+  }
+
+  async remove(key: string): Promise<void> {
+    await this.client!.storage.from(this.bucket).remove([key]);
+  }
+}
+
 let singleton: MediaStore | null = null;
 
 export function getMediaStore(): MediaStore {
   if (singleton) return singleton;
 
   const provider = process.env.MEDIA_STORAGE ?? "local";
+
+  if (provider === "supabase") {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) {
+      throw new Error(
+        "MEDIA_STORAGE=supabase requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+      );
+    }
+    const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? "media";
+    singleton = new SupabaseStore(url, key, bucket);
+    return singleton;
+  }
+
   if (provider !== "local") {
     throw new Error(
       `MEDIA_STORAGE=${provider} requested but no such adapter is implemented. ` +

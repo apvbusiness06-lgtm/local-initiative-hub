@@ -7,13 +7,24 @@ import { runDueJobs } from "@/lib/sync";
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
-  const secret = process.env.JOBS_RUN_SECRET;
+function checkAuth(request: NextRequest): NextResponse | null {
+  const secret = process.env.JOBS_RUN_SECRET ?? process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ error: "Job runner not configured" }, { status: 503 });
-
   const auth = request.headers.get("authorization");
   if (auth !== `Bearer ${secret}`) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return null;
+}
 
+async function run(): Promise<NextResponse> {
   const summary = await runDueJobs(50);
   return NextResponse.json(summary);
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  return checkAuth(request) ?? run();
+}
+
+// Vercel Cron Jobs send GET requests.
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  return checkAuth(request) ?? run();
 }

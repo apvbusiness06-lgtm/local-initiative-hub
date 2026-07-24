@@ -1,8 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Standalone output bundles a minimal server + only the needed node_modules
-  // into .next/standalone, which the Dockerfile copies for a small runtime image.
-  output: "standalone",
+  // "standalone" bundles a minimal server for Docker/self-hosted. Vercel ignores
+  // this (its own builder handles it), but it doesn't hurt to keep it — it only
+  // activates during `next build` outside Vercel's build pipeline.
+  output: process.env.VERCEL ? undefined : "standalone",
   poweredByHeader: false,
   eslint: {
     dirs: ["app", "lib"],
@@ -16,7 +17,7 @@ const nextConfig = {
   },
   async headers() {
     // Baseline security headers applied to every response. HSTS is set at the
-    // edge/proxy (it needs the request to already be HTTPS) — see deploy/nginx.
+    // edge/proxy layer (Vercel adds it automatically for custom domains).
     return [
       {
         source: "/:path*",

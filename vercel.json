@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npx prisma generate && next build",
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/jobs/run",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/jobs/rollup",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}
