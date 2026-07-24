@@ -482,6 +482,8 @@ async function main() {
         ? { dayOfWeek: 6, opensAt: "09:00", closesAt: "13:00", isClosed: false }
         : { dayOfWeek: day, opensAt: "09:00", closesAt: "17:30", isClosed: false };
 
+  const businessRecords: Record<string, { id: string }> = {};
+
   for (const b of demoBusinesses) {
     const business = await prisma.business.upsert({
       where: { slug: b.slug },
@@ -498,6 +500,7 @@ async function main() {
         sourceKind: "demo_seed",
       },
     });
+    businessRecords[b.slug] = business;
 
     const town = towns[b.town];
     const [lat, lng] = coords[b.town];
@@ -616,9 +619,234 @@ async function main() {
     }
   }
 
+  // ── Slice 5 demo depth: services + one premium subscription ────────────
+  // Exercises the entitlement-gated sections (gallery cap, "Premium
+  // Partner" badge) against real plan data instead of only code paths.
+  const plumbing = businessRecords["winchester-warm-plumbing"];
+  if (plumbing) {
+    const existingServices = await prisma.serviceProduct.count({ where: { businessId: plumbing.id } });
+    if (existingServices === 0) {
+      await prisma.serviceProduct.createMany({
+        data: [
+          {
+            businessId: plumbing.id,
+            name: "Boiler service",
+            description: "Annual boiler service and safety check.",
+            priceMinor: 8500,
+            isFromPrice: true,
+            sortOrder: 0,
+          },
+          {
+            businessId: plumbing.id,
+            name: "Emergency call-out",
+            description: "Same-day emergency plumbing repairs across Winchester.",
+            priceMinor: 6000,
+            isFromPrice: true,
+            sortOrder: 1,
+          },
+        ],
+      });
+    }
+
+    const premiumPlan = await prisma.plan.findFirstOrThrow({ where: { tenantId: null, key: "premium" } });
+    await prisma.subscription.upsert({
+      where: { businessId: plumbing.id },
+      update: {},
+      create: {
+        businessId: plumbing.id,
+        planId: premiumPlan.id,
+        status: "ACTIVE",
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+  }
+
+  // ── Demo offers ──────────────────────────────────────────────────────────
+  // No DirectoryPlacement rows here: directory_placements.subject_id carries
+  // a hard FK to businesses.id (placement_business_fk), so an OFFER-subject
+  // placement would fail to insert. Visibility inherits from the parent
+  // business's own placement instead — see lib/offers.ts.
+  type DemoOffer = {
+    slug: string;
+    businessSlug: string;
+    title: string;
+    description: string;
+    type: "PERCENTAGE" | "FIXED_AMOUNT" | "FREE_ITEM";
+    percentOff?: number;
+    amountOffMinor?: number;
+    terms: string;
+  };
+  const demoOffers: DemoOffer[] = [
+    {
+      slug: "winchester-warm-plumbing-boiler-service-10-off",
+      businessSlug: "winchester-warm-plumbing",
+      title: "10% off boiler servicing",
+      description: "Book an annual boiler service this month and save 10%.",
+      type: "PERCENTAGE",
+      percentOff: 10,
+      terms: "One redemption per household. Cannot be combined with other offers.",
+    },
+    {
+      slug: "basingstoke-bakehouse-free-coffee",
+      businessSlug: "the-basingstoke-bakehouse",
+      title: "Free coffee with any pastry",
+      description: "Buy any pastry and get a free coffee to go with it.",
+      type: "FREE_ITEM",
+      terms: "Dine-in or takeaway. While stocks last.",
+    },
+    {
+      slug: "solent-sparks-20-off-callout",
+      businessSlug: "solent-sparks-electrical",
+      title: "£20 off your first call-out",
+      description: "New customers save £20 on their first electrical call-out.",
+      type: "FIXED_AMOUNT",
+      amountOffMinor: 2000,
+      terms: "New customers only. Valid for one call-out per household.",
+    },
+  ];
+
+  const offerWindowEnd = new Date(Date.now() + 45 * 24 * 60 * 60 * 1000);
+  for (const o of demoOffers) {
+    const business = businessRecords[o.businessSlug];
+    if (!business) continue;
+    await prisma.offer.upsert({
+      where: { slug: o.slug },
+      update: {},
+      create: {
+        businessId: business.id,
+        slug: o.slug,
+        title: o.title,
+        description: o.description,
+        type: o.type,
+        percentOff: o.percentOff,
+        amountOffMinor: o.amountOffMinor,
+        startsAt: new Date(),
+        endsAt: offerWindowEnd,
+        terms: o.terms,
+        status: "ACTIVE",
+      },
+    });
+  }
+
+  // ── Demo events ──────────────────────────────────────────────────────────
+  // Same visibility caveat as offers (no working EVENT placement yet).
+  type DemoEvent = {
+    slug: string;
+    businessSlug: string;
+    title: string;
+    description: string;
+    venueName: string;
+    daysFromNow: number;
+    durationHours: number;
+  };
+  const demoEvents: DemoEvent[] = [
+    {
+      slug: "winchester-strong-fitness-free-taster",
+      businessSlug: "winchester-strong-fitness",
+      title: "Free community fitness taster session",
+      description: "Drop in for a free small-group training session — all levels welcome.",
+      venueName: "Winchester Strong Fitness",
+      daysFromNow: 9,
+      durationHours: 1,
+    },
+    {
+      slug: "basingstoke-bakehouse-coffee-tasting",
+      businessSlug: "the-basingstoke-bakehouse",
+      title: "Coffee tasting morning",
+      description: "Meet the roaster and try this season's single-origin coffees.",
+      venueName: "The Basingstoke Bakehouse",
+      daysFromNow: 16,
+      durationHours: 2,
+    },
+  ];
+
+  for (const e of demoEvents) {
+    const business = businessRecords[e.businessSlug];
+    if (!business) continue;
+    const event = await prisma.event.upsert({
+      where: { slug: e.slug },
+      update: {},
+      create: {
+        businessId: business.id,
+        slug: e.slug,
+        title: e.title,
+        description: e.description,
+        venueName: e.venueName,
+        status: "ACTIVE",
+      },
+    });
+    const existingOccurrence = await prisma.eventOccurrence.findFirst({ where: { eventId: event.id } });
+    if (!existingOccurrence) {
+      const startsAt = new Date(Date.now() + e.daysFromNow * 24 * 60 * 60 * 1000);
+      const endsAt = new Date(startsAt.getTime() + e.durationHours * 60 * 60 * 1000);
+      await prisma.eventOccurrence.create({ data: { eventId: event.id, startsAt, endsAt } });
+    }
+  }
+
+  // ── Demo blog/editorial content ─────────────────────────────────────────
+  // Platform-wide (ContentItem has no tenantId) — a minimal read path, not
+  // the full Slice 13 block editor/revisions/scheduling.
+  type DemoContent = {
+    slug: string;
+    kind: "NEWS" | "GUIDE" | "BLOG";
+    title: string;
+    excerpt: string;
+    body: string[];
+  };
+  const demoContent: DemoContent[] = [
+    {
+      slug: "welcome-to-hampshire-local-initiative",
+      kind: "NEWS",
+      title: "Welcome to Hampshire Local Initiative",
+      excerpt: "Why we built a directory of vetted, independent local businesses across Hampshire.",
+      body: [
+        "Hampshire Local Initiative is a directory of independent, locally-owned businesses across the county — plumbers, cafés, dentists, electricians and more.",
+        "Every listing is either claimed and verified by its owner, or imported and clearly marked as such until it is. We don't accept payment in exchange for a better review score.",
+      ],
+    },
+    {
+      slug: "five-independent-cafes-worth-a-detour",
+      kind: "GUIDE",
+      title: "Five independent cafés worth a detour in Hampshire",
+      excerpt: "From Winchester to Basingstoke, here's where locals actually go for a proper coffee.",
+      body: [
+        "Hampshire has no shortage of chain coffee shops, but the independents are where the county's character shows.",
+        "The Basingstoke Bakehouse roasts its own beans and bakes everything on site — worth the detour off the ring road alone.",
+      ],
+    },
+    {
+      slug: "how-we-vet-every-trade-on-this-directory",
+      kind: "BLOG",
+      title: "How we vet every trade on this directory",
+      excerpt: "Verification isn't a badge you can buy — here's what it actually checks.",
+      body: [
+        "A 'Verified' badge on this directory means a real person confirmed the business is who it says it is — not that they paid for a higher placement.",
+        "Claim and verification workflows are covered in detail as that part of the platform ships; for now, every verified demo listing on this site was manually flagged during seeding.",
+      ],
+    },
+  ];
+
+  for (const c of demoContent) {
+    await prisma.contentItem.upsert({
+      where: { slug: c.slug },
+      update: {},
+      create: {
+        slug: c.slug,
+        kind: c.kind,
+        title: c.title,
+        excerpt: c.excerpt,
+        bodyBlocks: c.body.map((text) => ({ type: "paragraph", text })),
+        status: "PUBLISHED",
+        publishedAt: new Date(),
+      },
+    });
+  }
+
   console.log("Seed complete.");
   console.log(`Tenants: ${hub.name} / ${hampshireTenant.name} / ${homeServicesTenant.name}`);
   console.log(`Categories: ${Object.keys(categories).length}, Businesses: ${demoBusinesses.length}`);
+  console.log(`Offers: ${demoOffers.length}, Events: ${demoEvents.length}, Content: ${demoContent.length}`);
 }
 
 main()

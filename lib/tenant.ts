@@ -73,6 +73,31 @@ export function invalidateTenantCache(hostname?: string) {
 }
 
 /**
+ * The hostname that holds the canonical placement for a subject (e.g. a
+ * business), for a syndicated page's rel=canonical. Placements carry RLS, so
+ * a normal tenant-scoped connection cannot see another tenant's canonical
+ * row — this reads through canonical_tenant_for_subject(), a narrow
+ * SECURITY DEFINER function that exposes only that one tenant_id (see the
+ * migration for why this is safer than granting BYPASSRLS).
+ */
+export async function resolveCanonicalHost(
+  subject: "BUSINESS" | "OFFER" | "EVENT" | "CONTENT",
+  subjectId: string
+): Promise<string | null> {
+  const rows = await base.$queryRaw<{ tenant_id: string | null }[]>`
+    SELECT canonical_tenant_for_subject(${subject}::"PlacementSubject", ${subjectId}::uuid) AS tenant_id
+  `;
+  const tenantId = rows[0]?.tenant_id;
+  if (!tenantId) return null;
+
+  const domain = await base.tenantDomain.findFirst({
+    where: { tenantId, isPrimary: true, verifiedAt: { not: null } },
+    select: { hostname: true },
+  });
+  return domain?.hostname ?? null;
+}
+
+/**
  * Runs `fn` inside a transaction with `app.tenant_id` set, so every RLS
  * policy applies. Use this for ALL request-scoped queries.
  *

@@ -2,10 +2,11 @@ import type { ResolvedTenant } from "@/lib/tenant";
 import type { SessionUser } from "@/lib/auth/session";
 import { logoutAction } from "@/app/account/actions";
 
-// Only links to routes that actually work end to end — Community, Events,
-// Offers, Spotlight and Newsletter from the reference header aren't built
-// yet (see BACKLOG.md), so they're not here. A nav item to a page that
-// 404s is worse than a shorter nav.
+// Only links to routes that actually work end to end. Blog/community
+// content (Slice-5-adjacent minimal read path) is real; full Offers/Events
+// index pages, Spotlight and Newsletter from the reference header aren't
+// built yet (see BACKLOG.md), so they're not here. A nav item to a page
+// that 404s is worse than a shorter nav.
 export function Header({ tenant, user }: { tenant: ResolvedTenant; user: SessionUser | null }) {
   return (
     <header className="border-b border-black/[0.07] bg-white/80 backdrop-blur">
@@ -23,6 +24,9 @@ export function Header({ tenant, user }: { tenant: ResolvedTenant; user: Session
         <nav className="flex items-center gap-5 text-sm">
           <a href="/businesses" className="opacity-80 transition hover:opacity-100">
             Businesses
+          </a>
+          <a href="/blog" className="opacity-80 transition hover:opacity-100">
+            Community
           </a>
           {user ? (
             <>

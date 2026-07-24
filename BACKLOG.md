@@ -1,14 +1,50 @@
 # Backlog
 
-Ideas and known gaps logged during Slices 0/1/3/4, deliberately not built
+Ideas and known gaps logged during Slices 0/1/3/4/5, deliberately not built
 now per `BUILD-BRIEF.md` rule 4 ("never widen scope mid-slice").
 
 ## Immediate next slice
 
-**Slice 5 — Listing page** is next (or Slice 7/business portal — either
-extends naturally from auth now being real). Slices 1, 4 and 2 were built
-first because the brief flags them as highest-risk/blocking; every
-remaining slice needs real sessions and `can()`, which now exist.
+**Slice 5 — Listing page** is done (`app/listing/[slug]/page.tsx`): gallery
+(entitlement-capped via `lib/entitlements.ts`), hours with open-now computed
+in the tenant timezone, services, address + directions link, CTAs, reviews
+with source labels, similar businesses, sponsored/featured/premium
+disclosure, report/suggest-edit/enquiry round-trips, and JSON-LD with
+`aggregateRating` only when there's at least one approved review. Same
+template for free and premium — verified locally against the demo premium
+subscription seeded on `winchester-warm-plumbing`.
+
+**Slice 7 — Business portal** is next. Slices 1, 4 and 2 were built first
+because the brief flags them as highest-risk/blocking; every remaining
+slice needs real sessions and `can()`, which now exist.
+
+### Bug found while building Slice 5: OFFER/EVENT placements can't be created
+
+`directory_placements.subject_id` carries a hard FK to `businesses.id`
+(`placement_business_fk`), even though the `subject` enum
+(`BUSINESS`/`OFFER`/`EVENT`/`CONTENT`) implies placements are polymorphic.
+Inserting a placement row with `subject = 'OFFER'` and `subjectId` pointing
+at an `Offer` fails the FK. Real Slice 10 work: migrate `subject_id` to a
+plain unconstrained column (or per-subject-type FKs via a check constraint)
+so offers/events can carry their own placement instead of inheriting
+visibility from their parent business, which is the interim behaviour
+`lib/offers.ts`/`lib/events.ts` use today.
+
+### Built ahead of sequence, at user request: minimal blog + homepage deals/events
+
+Real, DB-backed, but deliberately smaller than their eventual slices:
+
+- **`/blog`, `/blog/[slug]`** — reads `ContentItem` (platform-wide, no
+  `tenantId`, same pattern as categories). No block editor, no revisions,
+  no scheduling UI, no newsletter tie-in — that's Slice 13. `bodyBlocks` is
+  seeded as a flat `{type, text}` array; the real block editor's schema may
+  not match this shape when Slice 13 lands.
+- **Homepage "Deals & offers" and "What's on"** — read `lib/offers.ts` /
+  `lib/events.ts`, both tenant-scoped via the parent business's placement
+  (see the FK bug above — there's no other way today). No claim/QR
+  redemption flow (Slice 10), no RSVP (Slice 10). Cards link to the
+  offer/event's business listing page, not a dedicated offer/event page,
+  since those don't exist yet.
 
 ## Within already-built slices
 

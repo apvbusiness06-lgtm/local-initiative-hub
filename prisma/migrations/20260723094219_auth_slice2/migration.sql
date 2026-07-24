@@ -5,28 +5,35 @@
 
 */
 -- DropIndex
-DROP INDEX "business_locations_point_gix";
+-- These PostGIS/pg_trgm objects were originally applied by hand to the dev
+-- database before the raw-SQL migration existed, so Prisma diffed against a
+-- DB that already had them and emitted bare DROPs. In the committed history
+-- they are (re)created only in the LATER 20260723094500_postgis_and_rls
+-- migration, so on a clean sequential `migrate deploy` they do not exist at
+-- this point. IF EXISTS makes these no-ops on a fresh apply; the indexes and
+-- generated column are (re)created by the postgis migration that follows.
+DROP INDEX IF EXISTS "business_locations_point_gix";
 
 -- DropIndex
-DROP INDEX "businesses_name_trgm";
+DROP INDEX IF EXISTS "businesses_name_trgm";
 
 -- DropIndex
-DROP INDEX "businesses_search_gix";
+DROP INDEX IF EXISTS "businesses_search_gix";
 
 -- DropIndex
-DROP INDEX "events_point_gix";
+DROP INDEX IF EXISTS "events_point_gix";
 
 -- DropIndex
-DROP INDEX "places_boundary_gix";
+DROP INDEX IF EXISTS "places_boundary_gix";
 
 -- DropIndex
-DROP INDEX "places_centroid_gix";
+DROP INDEX IF EXISTS "places_centroid_gix";
 
 -- DropIndex
-DROP INDEX "places_name_trgm";
+DROP INDEX IF EXISTS "places_name_trgm";
 
 -- AlterTable
-ALTER TABLE "businesses" DROP COLUMN "search_vector";
+ALTER TABLE "businesses" DROP COLUMN IF EXISTS "search_vector";
 
 -- AlterTable
 ALTER TABLE "users" ADD COLUMN     "mfa_secret_encrypted" TEXT;
