@@ -21,7 +21,8 @@ sequence and `BACKLOG.md` for what's deliberately not built yet.
 | 5 | Listing page | ✅ Done — see BACKLOG.md for the OFFER/EVENT placement FK bug found while building it |
 | 6 | Claim flow | ✅ Done — email-possession + admin approval; ownership grant writes an AuditLog; used/expired tokens fail |
 | 7 | Business portal | ✅ Done — owner-gated editor; server-side image validation + metadata strip (sharp); entitlement limits enforced in the action layer; identity edits route to moderation |
-| 8–13 | Admin, billing, offers/events, reviews, GHL, content/newsletter/analytics | ⬜ Not started (minimal `/blog` read path and homepage deals/events sections built ahead of sequence — see BACKLOG.md) |
+| 8 | Admin backend | ✅ Done — moderation queue, claim review, listing/placement management, time-limited support impersonation (banner + dual-ID audit + auto-expiry) |
+| 9–13 | Billing, offers/events, reviews, GHL, content/newsletter/analytics | ⬜ Not started (minimal `/blog` read path and homepage deals/events sections built ahead of sequence — see BACKLOG.md) |
 
 Verified locally against a real PostgreSQL 16 + PostGIS instance:
 - `prisma migrate deploy` succeeds on an empty database.
