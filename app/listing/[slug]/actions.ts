@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { PrismaClient } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth/currentUser";
+import { submitFirstPartyReview } from "@/lib/reviews";
 
 const prisma = new PrismaClient();
 
@@ -80,6 +81,23 @@ export async function submitReportAction(businessId: string, slug: string, formD
   });
 
   redirect(`/listing/${slug}?report=sent`);
+}
+
+export async function submitReviewAction(businessId: string, slug: string, formData: FormData): Promise<void> {
+  const user = await getCurrentUser();
+  if (!user) redirect(`/login?next=${encodeURIComponent(`/listing/${slug}`)}`);
+
+  const rating = Number(formData.get("rating") ?? 0);
+  const result = await submitFirstPartyReview({
+    businessId,
+    userId: user!.id,
+    rating,
+    title: requireField(formData, "title", 140),
+    body: requireField(formData, "body", 4000),
+    authorName: requireField(formData, "authorName", 120) || undefined,
+  });
+
+  redirect(`/listing/${slug}?review=${result.ok ? "pending" : `error&reviewError=${encodeURIComponent(result.error)}`}#reviews`);
 }
 
 export async function submitEditSuggestionAction(businessId: string, slug: string, formData: FormData): Promise<void> {

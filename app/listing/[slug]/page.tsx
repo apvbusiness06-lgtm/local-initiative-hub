@@ -15,7 +15,7 @@ import { buildLocalBusinessJsonLd } from "@/lib/jsonld";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { Header } from "@/components/Header";
 import { ListingCard } from "@/components/ListingCard";
-import { submitEnquiryAction, submitReportAction, submitEditSuggestionAction } from "./actions";
+import { submitEnquiryAction, submitReportAction, submitEditSuggestionAction, submitReviewAction } from "./actions";
 
 function originFor(host: string): string {
   const proto = process.env.NODE_ENV === "production" ? "https" : "http";
@@ -425,8 +425,50 @@ export default async function ListingPage({
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm opacity-60">No reviews yet.</p>
+                <p className="text-sm opacity-60">No reviews yet — be the first.</p>
               )}
+
+              {/* First-party submission. Login-gated; goes to moderation.
+                  No gating: everyone who used the business may review. */}
+              <div id="reviews" className="mt-5 border-t border-black/[0.06] pt-5">
+                {flag("review") === "pending" ? (
+                  <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
+                    Thanks — your review has been submitted and will appear once approved.
+                  </p>
+                ) : user ? (
+                  <form action={submitReviewAction.bind(null, listing.id, listing.slug)} className="space-y-2.5 text-sm">
+                    <p className="font-medium">Write a review</p>
+                    {flag("review") === "error" && (
+                      <p className="rounded-lg bg-red-50 p-2 text-xs text-red-700">
+                        {flag("reviewError") ?? "Could not submit your review."}
+                      </p>
+                    )}
+                    <label className="block">
+                      <span className="mb-1 block text-xs opacity-70">Rating</span>
+                      <select name="rating" defaultValue="5" className="rounded-lg border border-black/10 px-2 py-1.5 text-sm">
+                        {[5, 4, 3, 2, 1].map((n) => (
+                          <option key={n} value={n}>
+                            {n} star{n === 1 ? "" : "s"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <input name="authorName" placeholder="Your name (optional)" className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm" />
+                    <input name="title" placeholder="Title (optional)" className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm" />
+                    <textarea name="body" rows={3} placeholder="Tell others about your experience" className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm" />
+                    <button type="submit" className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ backgroundColor: "var(--primary)" }}>
+                      Submit review
+                    </button>
+                  </form>
+                ) : (
+                  <p className="text-sm opacity-70">
+                    <a href={`/login?next=${encodeURIComponent(`/listing/${listing.slug}`)}`} className="underline" style={{ color: "var(--primary)" }}>
+                      Log in
+                    </a>{" "}
+                    to write a review.
+                  </p>
+                )}
+              </div>
             </Card>
           </div>
 

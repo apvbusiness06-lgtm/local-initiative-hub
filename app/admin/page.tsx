@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { adminGate } from "./adminShell";
 import { getRealUser } from "@/lib/auth/currentUser";
 import { can } from "@/lib/auth/rbac";
-import { pendingModeration } from "@/lib/admin";
+import { pendingModeration, pendingReviews } from "@/lib/admin";
 import { pendingClaimsForTenant } from "@/lib/claims";
 
 export const metadata: Metadata = { title: "Admin", robots: { index: false, follow: false } };
@@ -11,15 +11,17 @@ export default async function AdminDashboard() {
   const gate = await adminGate();
   if (!gate.ok) return gate.render(null);
 
-  const [moderation, claims, canImpersonate] = await Promise.all([
+  const [moderation, claims, reviews, canImpersonate] = await Promise.all([
     pendingModeration(gate.tenant.id),
     pendingClaimsForTenant(gate.tenant.id),
+    pendingReviews(gate.tenant.id),
     getRealUser().then((u) => (u ? can(u.id, "users.impersonate") : false)),
   ]);
 
   const cards: { href: string; title: string; desc: string; count?: number }[] = [
     { href: "/admin/moderation", title: "Moderation queue", desc: "Listing edits, reports and suggestions.", count: moderation.length },
     { href: "/admin/claims", title: "Claim review", desc: "Ownership claims awaiting approval.", count: claims.length },
+    { href: "/admin/reviews", title: "Review moderation", desc: "First-party reviews awaiting approval.", count: reviews.length },
     { href: "/admin/businesses", title: "Listings & placement", desc: "Approve, suspend, feature and sponsor listings." },
   ];
   if (canImpersonate) {

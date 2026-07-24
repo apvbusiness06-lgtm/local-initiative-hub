@@ -180,6 +180,53 @@ export async function setPlacementFlags(
   });
 }
 
+// ── Review moderation ────────────────────────────────────────
+export interface PendingReviewRow {
+  id: string;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  authorName: string | null;
+  provider: string;
+  createdAt: Date;
+  businessId: string;
+  businessName: string;
+  businessSlug: string;
+}
+
+export async function pendingReviews(tenantId: string): Promise<PendingReviewRow[]> {
+  return prisma.$queryRaw<PendingReviewRow[]>(Prisma.sql`
+    SELECT r.id, r.rating, r.title, r.body, r.author_name AS "authorName", r.provider,
+           r.created_at AS "createdAt",
+           b.id AS "businessId", b.trading_name AS "businessName", b.slug AS "businessSlug"
+    FROM reviews r
+    JOIN businesses b ON b.id = r.business_id
+    WHERE r.moderation_state = 'PENDING'
+      AND canonical_tenant_for_subject('BUSINESS'::"PlacementSubject", b.id) = ${tenantId}::uuid
+    ORDER BY r.created_at ASC
+  `);
+}
+
+export async function moderateReview(
+  ctx: AuditContext,
+  reviewId: string,
+  decision: "approve" | "reject" | "hide"
+): Promise<AdminResult> {
+  const review = await prisma.review.findUnique({ where: { id: reviewId } });
+  if (!review) return { ok: false, error: "Review not found" };
+  const state = decision === "approve" ? "APPROVED" : decision === "reject" ? "REJECTED" : "HIDDEN";
+
+  await prisma.$transaction(async (tx) => {
+    await tx.review.update({ where: { id: reviewId }, data: { moderationState: state } });
+    await writeAudit(
+      ctx,
+      { action: `review.${decision}`, subject: "review", subjectId: reviewId, before: { state: review.moderationState }, after: { state } },
+      tx
+    );
+  });
+  return { ok: true };
+}
+
 // ── Users (for impersonation start) ──────────────────────────
 export interface AdminUserRow {
   id: string;

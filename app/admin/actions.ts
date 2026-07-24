@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { resolveTenant } from "@/lib/tenant";
 import { getRealUser } from "@/lib/auth/currentUser";
 import { can } from "@/lib/auth/rbac";
-import { setListingStatus, resolveModerationReport, setPlacementFlags } from "@/lib/admin";
+import { setListingStatus, resolveModerationReport, setPlacementFlags, moderateReview } from "@/lib/admin";
 import type { AuditContext } from "@/lib/audit";
 import type { ListingStatus } from "@prisma/client";
 
@@ -33,6 +33,13 @@ export async function resolveReportAction(reportId: string, decision: string): P
   const d = decision === "approve" ? "approve" : "dismiss";
   const result = await resolveModerationReport(ctx, reportId, d);
   redirect(`/admin/moderation?${result.ok ? "done=1" : `error=${encodeURIComponent(result.error ?? "failed")}`}`);
+}
+
+export async function moderateReviewAction(reviewId: string, decision: string): Promise<void> {
+  const { ctx } = await adminGuard();
+  const d = decision === "approve" ? "approve" : decision === "hide" ? "hide" : "reject";
+  const result = await moderateReview(ctx, reviewId, d);
+  redirect(`/admin/reviews?${result.ok ? "done=1" : `error=${encodeURIComponent(result.error ?? "failed")}`}`);
 }
 
 export async function togglePlacementAction(placementId: string, formData: FormData): Promise<void> {
