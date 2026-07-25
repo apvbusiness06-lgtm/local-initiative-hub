@@ -1253,6 +1253,18 @@ model Invoice {
   @@map("invoices")
 }
 
+// Stripe webhook idempotency: each event.id is processed exactly once. A
+// replayed delivery finds the row already present and short-circuits, so
+// entitlement changes never double-apply (Slice 9 acceptance).
+model StripeWebhookEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  eventId     String   @unique @map("event_id")
+  type        String
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("stripe_webhook_events")
+}
+
 // ─────────────────────────────────────────────────────────────
 // INTEGRATIONS
 // ─────────────────────────────────────────────────────────────

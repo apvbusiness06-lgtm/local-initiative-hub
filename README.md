@@ -18,7 +18,16 @@ sequence and `BACKLOG.md` for what's deliberately not built yet.
 | 2 | Auth and accounts | ✅ Done |
 | 3 | Taxonomy + UK place seed | ✅ Done |
 | 4 | Search and map | ✅ Search done; map UI not started (behind `MapProvider`, no key configured) |
-| 5–13 | Listing page, claim flow, business portal, admin, billing, offers/events, reviews, GHL, content/newsletter/analytics | ⬜ Not started |
+| 5 | Listing page | ✅ Done — see BACKLOG.md for the OFFER/EVENT placement FK bug found while building it |
+| 6 | Claim flow | ✅ Done — email-possession + admin approval; ownership grant writes an AuditLog; used/expired tokens fail |
+| 7 | Business portal | ✅ Done — owner-gated editor; server-side image validation + metadata strip (sharp); entitlement limits enforced in the action layer; identity edits route to moderation |
+| 8 | Admin backend | ✅ Done — moderation queue, claim review, listing/placement management, time-limited support impersonation (banner + dual-ID audit + auto-expiry) |
+| 9 | Plans, entitlements, Stripe | ✅ Done — Checkout + billing portal; signature-verified, idempotent webhook; entitlements activate from verified webhook state; usage limits enforced in the action layer |
+| 10 | Offers and events | ✅ Done — offer claim (unique code + QR), staff redemption (concurrency-safe, one redemption per claim), events with DST-correct recurrence, RSVP, add-to-calendar (.ics), Event JSON-LD |
+| 11 | Reviews | ✅ Done — rate-limited first-party submission with moderation (no gating), provider sync behind a `ReviewProvider` interface with structural dedup, reconnect-on-token-expiry, scale-aware aggregation |
+| 12 | GHL sync | ✅ Done — idempotent outbound job queue (backoff + dead-letter + resync), signature-verified inbound webhook, loop prevention via `originSystem`, secret-redacted per-tenant sync log |
+| 13 | Content, newsletter, analytics | ✅ Done — consent-tracked newsletter with no-login token unsubscribe, content revisions + scheduled publishing, bot-filtered analytics with nightly rollups and a business dashboard |
+| — | Launch infrastructure | ✅ Done — Dockerfile (multi-stage standalone), docker-compose (PostGIS + app), nginx reverse-proxy example, db-init script, deployment guide, SMTP mailer, security headers, LEGAL.md templates |
 
 Verified locally against a real PostgreSQL 16 + PostGIS instance:
 - `prisma migrate deploy` succeeds on an empty database.
@@ -184,6 +193,23 @@ without a matching consent record and channel preference. Review gating
 not be implemented. Manually imported testimonials must be labelled as
 business-provided and never presented as independently verified.
 
-Privacy policy and terms templates require human legal review before
-launch — none exist yet, because no page collects personal data yet
-(Slice 2 is where that starts to matter).
+Privacy policy and terms templates are in `LEGAL.md` — they are
+**drafts with placeholders** and require solicitor review before any
+version is published or real personal data is collected.
+
+## Deployment
+
+See `deploy/README.md` for full instructions. Quick start:
+
+```bash
+cp .env.example .env            # fill AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY, etc.
+docker compose up --build -d
+docker compose exec app npx prisma migrate deploy
+docker compose exec app npm run db:grant
+```
+
+Put `deploy/nginx.conf.example` in front for TLS + multi-domain routing.
+For Cloud Run, see `deploy/README.md` § Cloud Run + Cloud SQL.
+
+The pre-launch checklist in `deploy/README.md` covers secrets, RLS
+verification, Stripe/GHL webhooks, TLS, and legal review.

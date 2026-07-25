@@ -27,17 +27,36 @@ class ConsoleSandboxMailer implements Mailer {
   }
 }
 
+// Real transactional email over SMTP. Provider-agnostic: SMTP_URL works with
+// any transactional provider that speaks SMTP (Resend, Postmark, SES, Mailgun,
+// SendGrid, a self-hosted relay...). MAIL_FROM sets the envelope/from address.
+class SmtpMailer implements Mailer {
+  // nodemailer is imported lazily so the sandbox path never loads it.
+  private transportPromise: Promise<import("nodemailer").Transporter> | null = null;
+
+  private async transport() {
+    if (!this.transportPromise) {
+      this.transportPromise = import("nodemailer").then((nm) => nm.createTransport(process.env.SMTP_URL));
+    }
+    return this.transportPromise;
+  }
+
+  async send(message: MailMessage): Promise<MailResult> {
+    const transport = await this.transport();
+    const from = process.env.MAIL_FROM || "Local Initiative <no-reply@localhost>";
+    await transport.sendMail({ from, to: message.to, subject: message.subject, text: message.text });
+    return { delivered: true, sandbox: false };
+  }
+}
+
 /**
- * Real transactional email (Slice 13 territory) isn't wired up yet. Until
- * SMTP_URL is set, callers get the sandbox mailer and must surface its
- * sandbox flag to the user rather than claiming a real email was sent.
+ * The sandbox mailer (console + inline preview) is the default so the app
+ * works with no email provider configured, never claiming a real send. Set
+ * SMTP_URL to route through a real provider.
  */
 export function getMailer(): Mailer {
   if (!process.env.SMTP_URL) {
     return new ConsoleSandboxMailer();
   }
-  throw new Error(
-    "SMTP_URL is configured but no real SMTP adapter is implemented yet. " +
-      "Connect a transactional email provider before relying on real delivery — see BACKLOG.md."
-  );
+  return new SmtpMailer();
 }
